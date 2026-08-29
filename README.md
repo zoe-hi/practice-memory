@@ -1,9 +1,9 @@
 # Practice Memory / 经验捕手
 
-当前后端已覆盖规范中的 Phase 1–6：文字/音频记忆标记、待复盘列表、
+当前后端已覆盖规范中的 Phase 1–7：文字/音频记忆标记、待复盘列表、
 多轮复盘、音频回答、草稿修改、幂等确认，以及可选的阿里云 DashScope
 真实 ASR/大模型 Provider，并支持经验列表、详情、带本地 fallback 的相似检索和
-过期未确认会话清理。
+过期未确认会话清理，以及一次性、有来源的文字/音频决策支持。
 
 ## Windows 本地运行
 
@@ -73,6 +73,42 @@ FakeAI 使用确定性的文字重合评分。DashScope 只允许从后端提供
 选择；真实排序超时、失败、输出非法或选择候选外 ID 时会自动使用相同本地评分，
 不会中断 Demo。
 
+## 有来源的决策支持
+
+接口为一次性 multipart 请求：
+
+```text
+POST /api/v1/decision-support
+activity_name=亲子共读活动
+text=现场很热闹，但几个孩子一直站在门口，我不知道该继续围坐还是让他们自由选书
+```
+
+`text` 与 `audio` 必须恰好提供一个。接口只从已确认经验中返回一条匹配记录，附带
+最多两个绑定该经验 ID 的可考虑方向和代价，以及一个仍需本人判断的问题。无匹配时
+返回 `match: null` 和空方向，不生成通用建议。请求是无状态的，不创建捕捉会话、不写
+经验表，也不保存求助录音或历史。
+
+先运行 seed 并启动 API，再用文字路径验证：
+
+```powershell
+curl.exe -X POST "http://localhost:8000/api/v1/decision-support" `
+  -F "activity_name=亲子共读活动" `
+  -F "text=现场很热闹，但几个孩子一直站在门口，我不知道该继续围坐还是让他们自由选书"
+```
+
+非敏感后端环境变量：
+
+```dotenv
+DEMO_ORG_CONTEXT=本机构服务村庄儿童、青少年与妇女；活动设计应从当地需求和环境出发，保留一线工作者判断，不让 AI 替代当地经验。
+```
+
+在 `backend/` 运行全量测试与依赖检查：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
 ## 过期会话清理
 
 应用会在数据库建表完成后、开始接收请求前清理一次已过期且未确认的会话。清理顺序是
@@ -86,7 +122,8 @@ FakeAI 使用确定性的文字重合评分。DashScope 只允许从后端提供
 ```
 
 命令输出 `deleted`、`failed`、`skipped` 汇总；存在失败时退出码非零。MVP 不包含应用内
-定时器，周期调用由部署环境负责。
+定时器，周期调用由部署环境负责。清理也会移除崩溃后遗留、以
+`decision-support-` 开头且不关联数据库行的临时请求目录。
 
 ## 配置与部署
 
@@ -115,7 +152,9 @@ AI_MAX_RETRIES=1
 API Key 与 Base URL 必须属于同一地域；使用 workspace 地址时用对应的 HTTPS
 `/api/v1` 地址覆盖 `AI_BASE_URL`。真实 Provider 会把内部临时音频作为本地
 `file://` URI 交给 Qwen-ASR，并要求 Qwen 返回严格 JSON；输出仍会经过 Pydantic
-和会话 turn 来源校验。Provider 错误不会向 API 响应暴露密钥、文件路径或模型原文。
+和会话 turn 来源校验。决策支持只向模型传入机构语境、当前困扰、唯一匹配经验和允许
+引用的非空字段；输出经过严格 Schema 与来源字段校验，失败时回退到匹配经验已有字段。
+Provider 错误不会向 API 响应暴露密钥、文件路径或模型原文。
 
 默认测试只使用离线适配器。只有显式设置 `RUN_REAL_AI_TESTS=1` 和 `AI_API_KEY`
 时，才会运行会消耗真实额度的 DashScope 冒烟测试：

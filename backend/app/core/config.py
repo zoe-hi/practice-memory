@@ -32,6 +32,10 @@ class Settings(BaseSettings):
 
     demo_contributor_name: str = "吴瑶儿"
     demo_contributor_role: str = "乡村图书馆员"
+    demo_org_context: str = (
+        "本机构服务村庄儿童、青少年与妇女；活动设计应从当地需求和环境出发，"
+        "保留一线工作者判断，不让 AI 替代当地经验。"
+    )
 
     @model_validator(mode="after")
     def validate_provider(self) -> "Settings":
@@ -66,6 +70,9 @@ class Settings(BaseSettings):
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
         self.ai_provider = self.ai_provider.strip().lower()
+        self.demo_org_context = self.demo_org_context.strip()
+        if not self.demo_org_context:
+            raise ValueError("DEMO_ORG_CONTEXT must not be blank")
         if self.ai_provider not in {"fake", "dashscope"}:
             raise ValueError("AI_PROVIDER must be 'fake' or 'dashscope'")
         if self.ai_provider == "dashscope":

@@ -207,7 +207,7 @@ def create_audio_capture_session(
     )
 
 
-def _transcribe(provider: AIProvider, audio_path: str) -> str:
+def transcribe_audio(provider: AIProvider, audio_path: str) -> str:
     try:
         transcript = provider.transcribe(audio_path).strip()
     except ProviderTimeoutError:
@@ -269,7 +269,7 @@ def _run_initial_marker_transcription(
             return
 
     try:
-        transcript = _transcribe(provider, str(audio_path))
+        transcript = transcribe_audio(provider, str(audio_path))
     except (ProviderTimeoutError, TranscriptionError) as exc:
         with session_factory() as db:
             session = get_capture_session(db, session_id)
@@ -507,7 +507,7 @@ def start_reflection(
                 500, "STORAGE_ERROR", "初始音频文件不可用。", retryable=False
             )
         try:
-            transcript = _transcribe(provider, str(audio_path))
+            transcript = transcribe_audio(provider, str(audio_path))
         except ProviderTimeoutError as exc:
             raise AppError(
                 504, "AI_TIMEOUT", "音频转写超时，请重试。", retryable=True
@@ -584,7 +584,7 @@ def submit_audio_turn(
         raise AppError(409, "INVALID_STATE", "当前会话不能提交回答。")
     stored = storage.store(audio, session.id)
     try:
-        transcript = _transcribe(provider, stored.path)
+        transcript = transcribe_audio(provider, stored.path)
     except ProviderTimeoutError as exc:
         storage.best_effort_delete_file(stored.path)
         raise AppError(

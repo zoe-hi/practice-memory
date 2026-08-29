@@ -18,6 +18,7 @@ MIME_SUFFIXES = {
     "audio/wav": ".wav",
 }
 READ_CHUNK_BYTES = 1024 * 1024
+DECISION_SUPPORT_DIR_PREFIX = "decision-support-"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,27 @@ class AudioStorage:
             return True
         except (OSError, ValueError):
             return False
+
+    def delete_orphan_decision_support_dirs(self) -> tuple[int, int]:
+        deleted = 0
+        failed = 0
+        try:
+            entries = list(self.root.iterdir()) if self.root.exists() else []
+        except OSError:
+            return 0, 1
+        for entry in entries:
+            if not entry.is_dir() or not entry.name.startswith(
+                DECISION_SUPPORT_DIR_PREFIX
+            ):
+                continue
+            try:
+                resolved = entry.resolve()
+                self._require_within_root(resolved)
+                shutil.rmtree(resolved)
+                deleted += 1
+            except (OSError, ValueError):
+                failed += 1
+        return deleted, failed
 
     def _session_dir(self, session_id: str) -> Path:
         path = (self.root / session_id).resolve()

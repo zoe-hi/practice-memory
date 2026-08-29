@@ -6,6 +6,8 @@ from typing import Protocol
 from app.matching import rank_experiences_locally
 from app.schemas import (
     ConversationMessage,
+    DecisionConsiderationDraft,
+    DecisionSupportAIResult,
     ExperienceCandidate,
     ExperienceDraft,
     ExperienceMatch,
@@ -29,6 +31,13 @@ class AIProvider(Protocol):
         concern: str,
         candidates: list[ExperienceCandidate],
     ) -> ExperienceMatch | None: ...
+
+    def support_decision(
+        self,
+        organization_context: str,
+        concern: str,
+        matched_experience: ExperienceCandidate,
+    ) -> DecisionSupportAIResult: ...
 
 
 class AIProviderError(RuntimeError):
@@ -96,6 +105,53 @@ class FakeAIProvider:
         candidates: list[ExperienceCandidate],
     ) -> ExperienceMatch | None:
         return rank_experiences_locally(concern, candidates)
+
+    def support_decision(
+        self,
+        organization_context: str,
+        concern: str,
+        matched_experience: ExperienceCandidate,
+    ) -> DecisionSupportAIResult:
+        del organization_context
+        considerations: list[DecisionConsiderationDraft] = []
+        tradeoff = matched_experience.shortcomings or matched_experience.observed_result
+        tradeoff_field = (
+            "shortcomings"
+            if matched_experience.shortcomings
+            else "observed_result"
+            if matched_experience.observed_result
+            else None
+        )
+        if matched_experience.action_and_reason:
+            basis_fields = ["action_and_reason"]
+            if tradeoff_field:
+                basis_fields.append(tradeoff_field)
+            considerations.append(
+                DecisionConsiderationDraft(
+                    direction=matched_experience.action_and_reason,
+                    tradeoff=tradeoff,
+                    basis_fields=basis_fields,
+                )
+            )
+        if (
+            matched_experience.things_to_note
+            and matched_experience.things_to_note
+            != matched_experience.action_and_reason
+        ):
+            considerations.append(
+                DecisionConsiderationDraft(
+                    direction=matched_experience.things_to_note,
+                    basis_fields=["things_to_note"],
+                )
+            )
+        return DecisionSupportAIResult(
+            understanding=concern,
+            considerations=considerations,
+            question_to_consider=(
+                matched_experience.open_question
+                or "你的现场与这条经验有哪些不同？"
+            ),
+        )
 
     def _build_draft(self, messages: Sequence[ConversationMessage]) -> ExperienceDraft:
         marker = next((message for message in messages if message.kind == MessageKind.marker), None)

@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.ai import AIProvider
 from app.audio import AudioStorage
 from app.api.capture_sessions import router as capture_sessions_router
+from app.api.decision_support import router as decision_support_router
 from app.api.experiences import router as experiences_router
 from app.api.health import router as health_router
 from app.core.config import Settings, get_settings
@@ -87,6 +88,7 @@ def create_app(
     )
     application.include_router(health_router, prefix="/api/v1")
     application.include_router(capture_sessions_router, prefix="/api/v1")
+    application.include_router(decision_support_router, prefix="/api/v1")
     application.include_router(experiences_router, prefix="/api/v1")
     return application
 

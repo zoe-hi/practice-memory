@@ -53,15 +53,32 @@ def search_experiences(
     provider: AIProvider,
     request: ExperienceSearchRequest,
 ) -> ExperienceSearchResponse:
+    return ExperienceSearchResponse(
+        match=find_experience_match(
+            db,
+            provider,
+            activity_name=request.activity_name,
+            concern=request.concern,
+        )
+    )
+
+
+def find_experience_match(
+    db: Session,
+    provider: AIProvider,
+    *,
+    activity_name: str,
+    concern: str,
+) -> ExperienceSearchMatch | None:
     stored_candidates = find_experience_candidates(
-        db, activity_name=request.activity_name, limit=20
+        db, activity_name=activity_name, limit=20
     )
     candidates = [_candidate(experience) for experience in stored_candidates]
     if not candidates:
-        return ExperienceSearchResponse(match=None)
+        return None
 
     try:
-        provider_match = provider.rank_experiences(request.concern, candidates)
+        provider_match = provider.rank_experiences(concern, candidates)
         match = (
             ExperienceMatch.model_validate(provider_match)
             if provider_match is not None
@@ -72,23 +89,21 @@ def search_experiences(
         }:
             raise ValueError("provider selected an experience outside candidates")
     except Exception:
-        match = rank_experiences_locally(request.concern, candidates)
+        match = rank_experiences_locally(concern, candidates)
 
     if match is None:
-        return ExperienceSearchResponse(match=None)
+        return None
     experience_by_id = {
         experience.id: experience for experience in stored_candidates
     }
     selected = experience_by_id.get(match.experience_id)
     if selected is None:
-        fallback = rank_experiences_locally(request.concern, candidates)
+        fallback = rank_experiences_locally(concern, candidates)
         if fallback is None:
-            return ExperienceSearchResponse(match=None)
+            return None
         match = fallback
         selected = experience_by_id[match.experience_id]
-    return ExperienceSearchResponse(
-        match=ExperienceSearchMatch(
-            experience=experience_to_response(selected),
-            why_similar=match.why_similar,
-        )
+    return ExperienceSearchMatch(
+        experience=experience_to_response(selected),
+        why_similar=match.why_similar,
     )

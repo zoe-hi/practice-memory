@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -229,3 +231,89 @@ class ExperienceSearchMatch(StrictModel):
 
 class ExperienceSearchResponse(StrictModel):
     match: ExperienceSearchMatch | None
+
+
+DecisionBasisField = Literal[
+    "context",
+    "action_and_reason",
+    "observed_result",
+    "went_well",
+    "shortcomings",
+    "things_to_note",
+    "open_question",
+]
+
+
+def _strip_required_text(value: object) -> object:
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            raise ValueError("text cannot be blank")
+    return value
+
+
+def _strip_optional_text(value: object) -> object:
+    if isinstance(value, str):
+        return value.strip() or None
+    return value
+
+
+class DecisionConsiderationDraft(StrictModel):
+    direction: str
+    tradeoff: str | None = None
+    basis_fields: list[DecisionBasisField] = Field(min_length=1, max_length=7)
+
+    _normalize_direction = field_validator("direction", mode="before")(
+        _strip_required_text
+    )
+    _normalize_tradeoff = field_validator("tradeoff", mode="before")(
+        _strip_optional_text
+    )
+
+
+class DecisionSupportAIResult(StrictModel):
+    understanding: str
+    considerations: list[DecisionConsiderationDraft] = Field(max_length=2)
+    question_to_consider: str | None = None
+
+    _normalize_understanding = field_validator("understanding", mode="before")(
+        _strip_required_text
+    )
+    _normalize_question = field_validator("question_to_consider", mode="before")(
+        _strip_optional_text
+    )
+
+
+class DecisionConsideration(StrictModel):
+    direction: str
+    tradeoff: str | None = None
+    basis_experience_id: UUID
+
+    _normalize_direction = field_validator("direction", mode="before")(
+        _strip_required_text
+    )
+    _normalize_tradeoff = field_validator("tradeoff", mode="before")(
+        _strip_optional_text
+    )
+
+
+class DecisionSupportResponse(StrictModel):
+    activity_name: str
+    concern_transcript: str
+    understanding: str
+    match: ExperienceSearchMatch | None
+    considerations: list[DecisionConsideration] = Field(max_length=2)
+    question_to_consider: str | None = None
+
+    _normalize_activity_name = field_validator("activity_name", mode="before")(
+        _strip_required_text
+    )
+    _normalize_concern = field_validator("concern_transcript", mode="before")(
+        _strip_required_text
+    )
+    _normalize_understanding = field_validator("understanding", mode="before")(
+        _strip_required_text
+    )
+    _normalize_question = field_validator("question_to_consider", mode="before")(
+        _strip_optional_text
+    )

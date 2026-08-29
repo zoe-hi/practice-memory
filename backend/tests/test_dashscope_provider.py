@@ -490,6 +490,98 @@ def test_dashscope_ranking_accepts_explicit_no_match_and_caps_input() -> None:
     assert len(payload["candidates"]) == 20
 
 
+def test_dashscope_decision_support_sends_one_experience_and_validates_sources() -> None:
+    valid = json.dumps(
+        {
+            "understanding": "你在判断是否降低进入活动的门槛。",
+            "considerations": [
+                {
+                    "direction": "可以参考先改为自由选书的处理。",
+                    "tradeoff": "现场可能变得分散。",
+                    "basis_fields": ["action_and_reason", "shortcomings"],
+                }
+            ],
+            "question_to_consider": "你的现场与这条经验有哪些不同？",
+        },
+        ensure_ascii=False,
+    )
+    client = StubDashScopeClient(generation_results=[_ok_generation(valid)])
+    candidate = ExperienceCandidate(
+        id="candidate-1",
+        activity_name="亲子共读活动",
+        context="几个孩子一直站在门口。",
+        action_and_reason="我改成自由选书，降低进入门槛。",
+        shortcomings="现场变得比较分散。",
+        open_question=None,
+    )
+
+    result = DashScopeAIProvider(_settings(), client=client).support_decision(
+        "本机构尊重一线工作者判断。",
+        "孩子一直站在门口",
+        candidate,
+    )
+
+    assert result.considerations[0].basis_fields == [
+        "action_and_reason",
+        "shortcomings",
+    ]
+    payload = json.loads(client.generation_calls[0]["messages"][1]["content"])
+    assert payload["organization_context"] == "本机构尊重一线工作者判断。"
+    assert payload["concern"] == "孩子一直站在门口"
+    assert payload["matched_experience"]["id"] == "candidate-1"
+    assert "candidates" not in payload
+    assert "open_question" not in payload["allowed_basis_fields"]
+    serialized = json.dumps(client.generation_calls, ensure_ascii=False)
+    assert "test-secret-key" not in serialized
+    assert "file://" not in serialized
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "not-json",
+        json.dumps(
+            {
+                "understanding": "理解",
+                "considerations": [
+                    {
+                        "direction": "没有合法来源",
+                        "tradeoff": None,
+                        "basis_fields": ["open_question"],
+                    }
+                ],
+                "question_to_consider": None,
+            }
+        ),
+        json.dumps(
+            {
+                "understanding": "理解",
+                "considerations": [],
+                "question_to_consider": None,
+                "extra": "forbidden",
+            }
+        ),
+    ],
+)
+def test_dashscope_decision_support_retries_invalid_output_once(
+    invalid: str,
+) -> None:
+    client = StubDashScopeClient(
+        generation_results=[_ok_generation(invalid), _ok_generation(invalid)]
+    )
+    candidate = ExperienceCandidate(
+        id="candidate-1",
+        activity_name="亲子共读活动",
+        context="孩子站在门口。",
+    )
+
+    with pytest.raises(ProviderInvalidOutputError):
+        DashScopeAIProvider(_settings(), client=client).support_decision(
+            "机构语境", "孩子在门口", candidate
+        )
+    assert len(client.generation_calls) == 2
+
+
 @pytest.mark.skipif(
     os.getenv("RUN_REAL_AI_TESTS") != "1" or not os.getenv("AI_API_KEY"),
     reason="requires explicit RUN_REAL_AI_TESTS=1 and AI_API_KEY",
@@ -514,3 +606,9 @@ def test_live_dashscope_provider_smoke() -> None:
     )
     match = provider.rank_experiences("总有孩子站在门口", [candidate])
     assert match is None or match.experience_id == candidate.id
+    decision = provider.support_decision(
+        settings.demo_org_context,
+        "总有孩子站在门口",
+        candidate,
+    )
+    assert len(decision.considerations) <= 2

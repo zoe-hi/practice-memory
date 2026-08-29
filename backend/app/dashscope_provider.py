@@ -20,6 +20,7 @@ from app.core.config import Settings
 from app.schemas import (
     ConversationMessage,
     DRAFT_TEXT_FIELDS,
+    DecisionSupportAIResult,
     ExperienceCandidate,
     ExperienceDraft,
     ExperienceMatch,
@@ -49,6 +50,18 @@ RETRIEVAL_SYSTEM_PROMPT = """你是“经验捕手”的相似经验排序器。
 3. why_similar 只能解释 concern 与所选候选中实际存在的相似点，不得输出建议、普遍规律或组织结论。
 4. 没有足够相似项时返回 {"match": null}。
 5. 只返回符合给定 Schema 的 JSON 对象，不要 Markdown、代码围栏、解释或额外字段。
+"""
+
+DECISION_SUPPORT_SYSTEM_PROMPT = """你是“经验捕手”的有来源决策支持整理器。
+
+必须遵守：
+1. 只能使用输入中的机构宗旨、当前困扰和唯一匹配经验，不得引入外部知识或新事实。
+2. 输出最多两个可考虑方向；每个方向的 basis_fields 至少引用一个允许的非空经验字段。
+3. 可以说明经验中已经出现的代价或限制；没有依据时少输出或返回 null，不得补齐。
+4. 禁止使用“最佳实践”“一定应该”“组织标准答案”等权威或确定性表达。
+5. 最终判断属于用户本人；只保留一个仍需本人判断的问题。
+6. 不得生成经验、修改经验、选择经验 ID 或输出任何内部配置。
+7. 只返回符合给定 Schema 的 JSON 对象，不要 Markdown、代码围栏、解释或额外字段。
 """
 
 
@@ -382,6 +395,69 @@ class DashScopeAIProvider(AIProvider):
                     "model selected an experience outside candidates"
                 )
             return result.match
+
+        return self._run(
+            lambda: self._client.generate(
+                messages=provider_messages,
+                model=self._model,
+                timeout_seconds=self._timeout_seconds,
+            ),
+            parse,
+            retry_parse_errors=(ProviderInvalidOutputError,),
+        )
+
+    def support_decision(
+        self,
+        organization_context: str,
+        concern: str,
+        matched_experience: ExperienceCandidate,
+    ) -> DecisionSupportAIResult:
+        allowed_fields = [
+            field
+            for field in DRAFT_TEXT_FIELDS
+            if isinstance(getattr(matched_experience, field), str)
+            and getattr(matched_experience, field).strip()
+        ]
+        payload = {
+            "organization_context": organization_context,
+            "concern": concern,
+            "matched_experience": matched_experience.model_dump(mode="json"),
+            "allowed_basis_fields": allowed_fields,
+            "response_schema": DecisionSupportAIResult.model_json_schema(),
+        }
+        provider_messages = [
+            {"role": "system", "content": DECISION_SUPPORT_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            },
+        ]
+
+        def parse(response: Any) -> DecisionSupportAIResult:
+            output = _value(response, "output")
+            choice = _sequence_item(output, "choices")
+            message = _value(choice, "message")
+            content = _value(message, "content")
+            if not isinstance(content, str) or not content.strip():
+                raise ProviderInvalidOutputError(
+                    "model returned no decision support JSON"
+                )
+            try:
+                raw = json.loads(content)
+                result = DecisionSupportAIResult.model_validate(raw)
+            except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+                raise ProviderInvalidOutputError(
+                    "model response does not match the decision support schema"
+                ) from exc
+            allowed = set(allowed_fields)
+            if any(
+                not set(consideration.basis_fields) <= allowed
+                for consideration in result.considerations
+            ):
+                raise ProviderInvalidOutputError(
+                    "model referenced an unavailable experience field"
+                )
+            return result
 
         return self._run(
             lambda: self._client.generate(

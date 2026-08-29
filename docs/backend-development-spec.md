@@ -1,10 +1,10 @@
-# 经验捕手｜后端开发规范 v1.4
+# 经验捕手｜后端开发规范 v1.5
 
 > **用途：**全新仓库的后端绿色开发规范，可直接交给 Codex 或后端开发者执行。  
 > **推荐仓库路径：**`docs/backend-development-spec.md`  
-> **状态：**Phase 1–6 implemented MVP specification  
+> **状态：**Phase 1–7 implemented MVP specification
 > **更新时间：**2026-08-29  
-> **上位事实源：**`Build-Ledger-v1.md` v1.2  
+> **上位事实源：**Build Ledger v1.5；`docs/decision-support-backend-change-spec.md` v1.0
 > **适用范围：**She Nicest 黑客松 Golden Demo；单一演示身份、单实例部署。
 
 ---
@@ -830,6 +830,7 @@ AI_MAX_RETRIES=1
 
 DEMO_CONTRIBUTOR_NAME=吴瑶儿
 DEMO_CONTRIBUTOR_ROLE=乡村图书馆员
+DEMO_ORG_CONTEXT=本机构服务村庄儿童、青少年与妇女；活动设计应从当地需求和环境出发，保留一线工作者判断，不让 AI 替代当地经验。
 ```
 
 配置读取应在应用启动时校验。`AI_PROVIDER` 只接受 `fake` 或 `dashscope`；`fake` 时不要求密钥，选择 DashScope 而缺少密钥、模型名或合法 HTTPS Base URL 时应启动失败并给出明确错误。`AI_MAX_RETRIES` 只允许 `0` 或 `1`。`CORS_ORIGINS` 与 `LOG_LEVEL` 必须符合 10.3 节约束。
@@ -935,6 +936,14 @@ SQLite 建议：
 - 收紧 CORS 白名单、方法、请求头和日志安全；
 - 运行全量测试、依赖检查、健康检查以及 seed/cleanup CLI 验收。
 
+### Phase 7：有来源的决策支持
+
+- 新增无状态文字/音频困扰接口；
+- 复用已确认经验检索，返回一条经验和最多两个绑定来源的方向；
+- 实现 FakeAI、DashScope 严格 JSON 和确定性 fallback；
+- 成功、失败或超时后清理请求音频，并清理崩溃遗留目录；
+- 保持两表模型和 Phase 1–6 API 行为不变。
+
 不要在 Phase 2 完成前接真实模型，不要在 Golden Path 跑通前开发非 P0 能力。
 
 ---
@@ -985,6 +994,10 @@ Windows 命令可以补充，但不要让 Windows 专用路径进入业务代码
 - [x] FakeAI 路径不需要网络。
 - [x] `pytest -q` 全部通过。
 - [x] README 记录启动、配置、测试和 Demo fallback。
+- [x] `/api/v1/decision-support` 支持 text/audio 二选一并出现在 OpenAPI。
+- [x] 决策支持只读取一条已确认经验，每个方向绑定同一经验 ID。
+- [x] 无匹配不生成建议，生成失败使用仅基于经验字段的 fallback。
+- [x] 决策支持请求不创建会话、经验或新数据库表，临时音频可清理。
 
 ---
 
@@ -1001,3 +1014,126 @@ Windows 命令可以补充，但不要让 Windows 专用路径进入业务代码
 7. **剩余限制：**只列真实存在且会影响 Demo 的问题。
 
 不要只说“代码已完成”；必须给出可复核证据。
+
+---
+
+## 19. Phase 7：有来源的决策支持（已实现）
+
+本节冻结 Phase 7 的增量契约。它是对现有经验库的无状态读取，不改变 Phase 1–6
+捕捉、复盘、确认与检索接口。
+
+### 19.1 产品语义与边界
+
+决策支持是基于机构语境和一条已确认个人经验的一次性、结构化支持，不是开放式 AI
+顾问。用户以文字或语音描述当前困境，系统只从 `experiences` 表检索一条匹配经验，
+展示完整公开经验、相关原因、最多两个有来源的可考虑方向及代价，并保留一个由用户本人
+判断的问题。
+
+必须保持：
+
+- 每个方向绑定返回经验的 ID，AI 不能选择或生成公开来源 ID；
+- 无匹配经验时返回 `match: null`、空 `considerations` 和 null 问题，不生成通用建议；
+- 不把个人经验改写为最佳实践、组织标准答案或确定性结论；
+- 不创建或复用 `capture_sessions`，不写入 `experiences`，不保存求助历史或模型原文；
+- 不新增数据库表、迁移、向量检索、组织配置后台、多轮顾问或前端实现。
+
+### 19.2 API 与公开 Schema
+
+```http
+POST /api/v1/decision-support
+Content-Type: multipart/form-data
+```
+
+表单字段：`activity_name` 必填且去除首尾空白后非空；`audio` 与 `text` 必须恰好
+提供一个，文字去除首尾空白后非空。音频沿用 10.1 节的 MIME、15 MiB 默认上限和
+路径安全约束。
+
+新增严格 Pydantic 模型：
+
+```python
+class DecisionConsideration(StrictModel):
+    direction: str
+    tradeoff: str | None = None
+    basis_experience_id: UUID
+
+class DecisionSupportResponse(StrictModel):
+    activity_name: str
+    concern_transcript: str
+    understanding: str
+    match: ExperienceSearchMatch | None
+    considerations: list[DecisionConsideration]  # 最多 2 条
+    question_to_consider: str | None
+```
+
+响应复用现有公开经验类型，不返回音频路径、机构 Prompt、内部来源字段或密钥。输入错误
+沿用 `INPUT_REQUIRED`、`INVALID_INPUT`、`AUDIO_TOO_LARGE`、
+`UNSUPPORTED_AUDIO_TYPE`、`TRANSCRIPTION_FAILED` 和 `STORAGE_ERROR` 的统一格式。
+
+### 19.3 Provider 与来源校验
+
+`AIProvider` 保留现有三个方法，并新增：
+
+```python
+def support_decision(
+    self,
+    organization_context: str,
+    concern: str,
+    matched_experience: ExperienceCandidate,
+) -> DecisionSupportAIResult: ...
+```
+
+Provider 只返回保守理解、最多两个方向草稿和一个可选问题；不能重新生成经验或控制经验
+ID。内部 `DecisionConsiderationDraft` 包含 `direction`、可空 `tradeoff` 和至少一个
+`basis_fields`。`basis_fields` 只能引用匹配经验中非空的 `context`、
+`action_and_reason`、`observed_result`、`went_well`、`shortcomings`、
+`things_to_note`、`open_question`。所有新增模型 `extra="forbid"`，空白字符串按现有
+Schema 风格规范化或拒绝。
+
+FakeAI 必须离线、确定性并只复述输入和匹配经验字段。DashScope 使用现有超时、最多一次
+重试、严格 JSON、Pydantic 校验和安全日志边界；Prompt 只传机构语境、当前困扰、唯一
+匹配经验和可引用的非空字段。
+
+### 19.4 服务编排与 fallback
+
+决策支持使用独立服务层，复用现有活动名称候选筛选、最多 20 条候选、Provider 排序和
+本地排序回退，最终只读取服务选中的一条已确认经验。无匹配时不得调用
+`support_decision`。
+
+找到经验后，如生成 Provider 超时、异常或输出非法，服务层返回确定性 fallback：保守
+复述困扰；方向优先使用 `action_and_reason`、其次 `things_to_note`；代价优先使用
+`shortcomings`、其次 `observed_result`；问题优先使用 `open_question`，否则为
+“你的现场与这条经验有哪些不同？”。公开 `basis_experience_id` 始终由服务层写为匹配
+经验 ID，不使用外部知识补写。
+
+### 19.5 音频与配置
+
+决策支持音频同步落盘、转写和处理。实际临时目录名为
+`decision-support-{server_uuid}`，限制在
+`AUDIO_STORAGE_DIR` 内，并在 `try/finally` 中于成功、失败或超时后尽力删除文件和请求
+目录。请求不产生数据库记录；启动与 CLI 清理会删除无数据库行可关联的
+`decision-support-` 孤儿临时目录，并把成功/失败计入安全清理汇总。
+
+新增非敏感后端配置：
+
+```dotenv
+DEMO_ORG_CONTEXT=本机构服务村庄儿童、青少年与妇女；活动设计应从当地需求和环境出发，保留一线工作者判断，不让 AI 替代当地经验。
+```
+
+FakeAI 与 DashScope 使用同一配置入口；前端不提交，响应不完整回传。
+
+### 19.6 Phase 7 测试与验收
+
+默认测试继续使用临时 SQLite、临时音频目录和 FakeAI，不访问网络。必须覆盖文字/音频
+成功、二选一和空输入、MIME/大小、数据库行数不变、未确认会话不参与匹配、无匹配不
+调用生成、最多两条方向、来源 ID 和字段合法性、Provider 非法/异常 fallback、音频成功
+与失败清理、响应和日志隐私，以及 Phase 1–6 全量回归。
+
+实现顺序为：文档先行 → 文字与 Schema → 确定性 fallback → 音频 → DashScope →
+全量验收 → 按真实结果回写文档。最终需运行 `python -m pytest -q`、
+`python -m pip check`、文字 Golden Path 和无匹配验证；真实网络测试仅在明确配置密钥和
+开关后运行。
+
+2026-08-29 实际验收：`90 passed, 1 skipped, 2 warnings`；`pip check` 无破损依赖。
+默认跳过项为真实 DashScope 网络冒烟测试。手工 TestClient 验证命中经验
+`00000000-0000-4000-8000-000000000501`，无匹配时未调用生成，且请求前后数据库行数
+保持 `capture_sessions=0, experiences=6`。

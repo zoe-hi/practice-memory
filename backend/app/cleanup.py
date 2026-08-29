@@ -68,6 +68,9 @@ def cleanup_expired_sessions(
             db.delete(session)
             db.commit()
             deleted += 1
+    orphan_deleted, orphan_failed = storage.delete_orphan_decision_support_dirs()
+    deleted += orphan_deleted
+    failed += orphan_failed
     return CleanupResult(deleted=deleted, failed=failed, skipped=skipped)
 
 

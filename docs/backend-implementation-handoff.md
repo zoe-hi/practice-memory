@@ -1,8 +1,8 @@
 # 经验捕手后端实现交接文档
 
 > 文档日期：2026-08-29  
-> 实现基线：`main` 分支，提交 `089e179` 之后的后端状态  
-> 规范基线：`docs/backend-development-spec.md` v1.4  
+> 实现基线：`main` 分支，Phase 7 工作树
+> 规范基线：`docs/backend-development-spec.md` v1.5
 > 适用范围：黑客松 MVP、单演示身份、单实例部署
 
 ## 1. 当前结论
@@ -25,6 +25,9 @@ DashScope 适配已通过伪造 SDK 的离线测试，但没有在默认测试�
 
 当前没有前端代码。后端公开接口已经稳定，可以开始在仓库根目录新增 `frontend/`
 进行对接。
+
+Phase 7“有来源的决策支持”已经完成。文字路径可完全离线运行；音频路径使用同步 ASR
+并在成功、失败或超时后清理。决策支持是一次无状态读取，不会创建捕捉会话或经验。
 
 ## 2. 已冻结的产品语义
 
@@ -50,6 +53,12 @@ DashScope 适配已通过伪造 SDK 的离线测试，但没有在默认测试�
 | Phase 4 | DashScope Qwen-ASR、Qwen 结构化复盘、严格校验、超时/重试/错误映射 | 完成，真实服务默认不启用 |
 | Phase 5 | 6 条幂等种子经验、经验列表/详情、本地匹配、DashScope 候选排序与 fallback | 完成 |
 | Phase 6 | 启动清理、清理 CLI、严格 CORS、安全日志、最终文档和验收 | 完成 |
+| Phase 7 | 无状态决策支持：文字/音频困扰、单条已确认经验、最多两个有来源方向与 fallback | 完成，真实服务默认不启用 |
+
+Phase 7 实际边界：新增 `POST /api/v1/decision-support` multipart 接口；不复用或创建
+`capture_sessions`，不写入 `experiences`，不新增数据库表。无匹配经验时不生成建议；
+每个方向的公开来源 ID 由服务层绑定到返回的同一条经验。已新增
+`DEMO_ORG_CONTEXT`，并复用现有音频安全、同步 ASR、经验检索和统一错误能力。
 
 ## 4. 实际工程结构
 
@@ -58,6 +67,7 @@ backend/
 ├── app/
 │   ├── api/
 │   │   ├── capture_sessions.py    # 捕捉/复盘/确认路由
+│   │   ├── decision_support.py    # 无状态决策支持路由
 │   │   ├── experiences.py         # 经验列表、详情、检索路由
 │   │   └── health.py              # 健康检查
 │   ├── core/
@@ -71,6 +81,7 @@ backend/
 │   ├── audio.py                   # 音频存储与路径安全
 │   ├── cleanup.py                 # 过期清理服务与 CLI
 │   ├── dashscope_provider.py      # DashScope SDK 边界和真实 Provider
+│   ├── decision_support.py        # 来源校验、编排和确定性 fallback
 │   ├── experience_services.py     # 经验读取和检索服务
 │   ├── main.py                    # 应用工厂、生命周期、CORS
 │   ├── matching.py                # 确定性本地匹配
@@ -79,7 +90,7 @@ backend/
 │   ├── schemas.py                 # 严格 Pydantic 契约
 │   ├── seed.py                    # 6 条幂等种子经验
 │   └── services.py                # 捕捉、复盘、草稿和确认业务
-├── tests/                         # 76 个通过、1 个条件跳过
+├── tests/                         # 90 个通过、1 个条件跳过
 ├── .env.example
 └── requirements.txt
 ```
@@ -106,9 +117,11 @@ FastAPI 默认文档可通过 `/docs` 和 `/openapi.json` 查看。
 | GET | `/api/v1/experiences` | 经验列表；支持 `activity_name` 和 `limit` | 200 |
 | GET | `/api/v1/experiences/{experience_id}` | 已确认经验详情 | 200/404 |
 | POST | `/api/v1/experiences/search` | 按活动名称和困扰检索一条经验 | 200 |
+| POST | `/api/v1/decision-support` | 以 multipart `text` 或 `audio` 获取一次有来源决策支持 | 200/400/502/504 |
 
 创建标记和提交回答时，`text` 与 `audio` 必须恰好提供一个。`limit` 范围为
-1–100。搜索请求的 `activity_name` 与 `concern` 必须为非空文字。
+1–100。搜索请求的 `activity_name` 与 `concern` 必须为非空文字。决策支持要求
+`activity_name` 非空且 `text`/`audio` 恰好一个；无匹配仍返回 200，但不生成方向。
 
 统一错误格式：
 
@@ -184,6 +197,8 @@ SQLite 连接启用 `foreign_keys=ON` 和 `check_same_thread=False`。
 - 使用中文双字片段和字母数字词重合进行本地经验排序。
 - 默认不能猜测音频内容；没有注入测试转写时，音频 ASR 会安全失败，因此无真实
   Provider 时应使用文字 fallback。
+- 决策支持会保守复述困扰，只从匹配经验的行动、结果、不足、提醒和问题生成最多两个
+  方向；公开来源 ID 仍由服务层统一写入。
 
 ### DashScopeAIProvider
 
@@ -196,6 +211,8 @@ SQLite 连接启用 `foreign_keys=ON` 和 `check_same_thread=False`。
 - 网络错误、429、5xx、超时和首次非法结构最多重试一次；确定性 4xx 不重试。
 - 检索 Provider 失败或返回候选外 ID 时，服务层自动回退到本地排序；Provider 合法
   返回 `null` 时尊重“无匹配”。
+- 决策支持 Prompt 只包含机构语境、当前困扰、唯一匹配经验和可引用非空字段；严格
+  JSON 输出不能选择经验 ID，非法输出最终由服务层确定性 fallback。
 
 真实服务冒烟测试只有同时设置 `RUN_REAL_AI_TESTS=1` 和 `AI_API_KEY` 才会执行。
 
@@ -210,6 +227,8 @@ SQLite 连接启用 `foreign_keys=ON` 和 `check_same_thread=False`。
 - 后台转写不会覆盖用户已经手工修正的转写。
 - 开始复盘时若转写缺失但音频存在，会同步重试。
 - 回答音频转写成功后立即删除；转写失败或超时也会尽力立即删除并要求重新上传。
+- 决策支持音频保存在 `decision-support-{server_uuid}` 请求目录，使用同步转写，并在
+  成功、失败或超时后清理；启动/CLI 会清理崩溃遗留目录。
 - 确认事务成功后清理整个会话音频目录；清理失败不会回滚已确认经验。
 - 过期未确认会话由启动清理或清理 CLI 删除；清理失败时保留数据库行并标记
   `failed/STORAGE_ERROR`，供下一次重试。
@@ -252,6 +271,7 @@ SQLite 连接启用 `foreign_keys=ON` 和 `check_same_thread=False`。
 | `AI_MAX_RETRIES` | `1` | 仅允许 0 或 1 |
 | `DEMO_CONTRIBUTOR_NAME` | `吴瑶儿` | 当前仅作为演示配置 |
 | `DEMO_CONTRIBUTOR_ROLE` | `乡村图书馆员` | 当前仅作为演示配置 |
+| `DEMO_ORG_CONTEXT` | 演示机构宗旨 | 仅由后端传给决策支持 Provider，不回传前端 |
 
 DashScope 模式缺少密钥、模型名或合法 HTTPS Base URL 时，应用构造阶段会失败。
 CORS 不允许用户信息、路径、查询和 fragment；应用不使用 Cookie，
@@ -291,7 +311,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```text
 python -m pytest -q
-76 passed, 1 skipped, 2 warnings
+90 passed, 1 skipped, 2 warnings
 
 python -m pip check
 No broken requirements found.
@@ -319,6 +339,11 @@ Assistants API 的提示；当前实现未使用 Assistants API。
 - 种子数据、经验列表/详情、候选筛选、本地/AI 检索 fallback；
 - 启动/CLI 过期清理、清理失败重试；
 - CORS 配置、预检和日志敏感信息不泄露。
+- 决策支持文字/音频、零写入、无匹配、严格来源、Provider fallback 和临时音频清理。
+
+手工 TestClient 决策支持结果：健康检查 200，OpenAPI 包含新接口；文字困扰命中经验
+`00000000-0000-4000-8000-000000000501` 并返回 2 个来源方向；无匹配返回 null/空列表，
+且没有再次调用生成；数据库行数从 `(capture_sessions=0, experiences=6)` 到 `(0, 6)`。
 
 ## 14. 前端接入建议
 
@@ -335,6 +360,8 @@ Assistants API 的提示；当前实现未使用 Assistants API。
 8. 前端不得请求或展示内部音频路径、草稿来源映射、warnings 或未确认经验。
 9. 确认按钮允许安全重试；后端会返回相同经验。
 10. 经验搜索只展示后端返回的已确认经验和 `why_similar`。
+11. 决策支持使用 multipart `activity_name` 和 `text`/`audio` 二选一；只展示后端返回的
+    匹配经验、来源方向、代价和本人判断问题，不把它呈现为组织标准答案。
 
 ## 15. 尚未实现和真实限制
 
@@ -350,7 +377,9 @@ Assistants API 的提示；当前实现未使用 Assistants API。
 - 没有上传音频时长和真实媒体内容校验；当前只校验 MIME 与字节大小。
 - 没有速率限制、配额、生产监控平台或完整结构化审计日志。
 - 默认 FakeAI 无法转写真实音频；真实音频 Demo 需要 DashScope 配置。
-- DashScope 真实网络调用尚未在本项目默认验收中执行，地域、额度和账号权限需要部署前单独验证。
+- DashScope 真实 ASR、复盘、检索和决策支持网络调用尚未在本项目默认验收中执行，地域、
+  额度和账号权限需要部署前单独验证。
+- 决策支持不保存请求历史，也不支持多轮追问；这是当前冻结的无状态 MVP 边界。
 - 依赖使用版本范围而非 lockfile，重新安装可能取得不同补丁版本。
 
 ## 16. 接手后的首轮检查清单
