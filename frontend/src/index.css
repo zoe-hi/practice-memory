@@ -1,0 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --color-lime: #d0ea06;
+  --color-lime-soft: #e6f77a;
+  --color-lime-wash: #f3fbc4;
+  --color-cream: #fbfdf0;
+  --color-ink: #1c2b0a;
+  --color-ink-soft: #4a5d2e;
+  --color-leaf: #86b817;
+  --font-display: 'Baloo 2', 'Noto Sans SC', system-ui, sans-serif;
+  --font-body: 'Noto Sans SC', 'Baloo 2', system-ui, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-cream);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hide scrollbars until scrolling */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes float-bob {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-14px) rotate(1deg); }
+}
+.animate-bob { animation: float-bob 4.5s ease-in-out infinite; }
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  70% { transform: scale(1.6); opacity: 0; }
+  100% { opacity: 0; }
+}
+.animate-ring { animation: pulse-ring 2.2s ease-out infinite; }
+
+@keyframes wobble {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+.animate-wobble { animation: wobble 3s ease-in-out infinite; }
+
+@keyframes mascot-blink {
+  0%, 86%, 100% { opacity: 0; }
+  88%, 91% { opacity: 1; }
+}
+.mascot-blink { animation: mascot-blink 3s ease-in-out infinite; }
