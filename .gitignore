@@ -46,3 +46,6 @@ backend/storage/audio/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local agent instructions
+AGENTS.md
