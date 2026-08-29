@@ -45,6 +45,14 @@ export function submitAudioTurn(sessionId: string, audio: Blob) {
   return api<{ status: string; next_question: { text: string } | null; draft: unknown | null }>(`/capture-sessions/${sessionId}/turns`, { method: "POST", body });
 }
 
+export function patchReflectionAnswer(sessionId: string, turnId: string, text: string) {
+  return api<{ status: string; next_question: { text: string } | null; draft: unknown | null }>(`/capture-sessions/${sessionId}/turns/${turnId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
 export function patchDraft(sessionId: string, draft: ExperienceContent) {
   return api<CaptureSession>(`/capture-sessions/${sessionId}/draft`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) });
 }
@@ -73,5 +81,12 @@ export function requestDecisionSupport(concern: string) {
   const body = new FormData();
   body.set("activity_name", "亲子共读活动");
   body.set("text", concern);
+  return api<DecisionSupportResponse>("/decision-support", { method: "POST", body });
+}
+
+export function requestDecisionSupportAudio(audio: Blob) {
+  const body = new FormData();
+  body.set("activity_name", "亲子共读活动");
+  body.set("audio", audio, "decision-concern.webm");
   return api<DecisionSupportResponse>("/decision-support", { method: "POST", body });
 }

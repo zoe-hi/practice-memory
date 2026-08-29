@@ -343,7 +343,7 @@ def test_reflection_normalizes_common_follow_up_flag_variations(ready_value) -> 
     assert result.draft is None
 
 
-def test_reflection_rejects_continuing_after_two_questions() -> None:
+def test_reflection_rejects_continuing_after_five_questions() -> None:
     response = json.dumps(
         {
             "ready_for_confirmation": False,
@@ -357,7 +357,7 @@ def test_reflection_rejects_continuing_after_two_questions() -> None:
     )
     with pytest.raises(ProviderInvalidOutputError):
         DashScopeAIProvider(_settings(), client=client).advance_reflection(
-            [_marker()], None, 2
+            [_marker()], None, 5
         )
     assert len(client.generation_calls) == 2
 

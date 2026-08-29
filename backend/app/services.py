@@ -39,6 +39,7 @@ from app.schemas import (
     NextQuestion,
     ReflectionAdvanceResult,
     ReflectionResponse,
+    TurnPatch,
     TurnResponse,
 )
 
@@ -407,12 +408,7 @@ def _safe_draft(
     )
 
 
-def _forced_limit_draft() -> ExperienceDraft:
-    return ExperienceDraft(
-        source_turn_ids={field: [] for field in DRAFT_TEXT_FIELDS},
-        warnings=["question_limit_reached"],
-    )
-
+MAX_REFLECTION_QUESTIONS = 5
 
 def _advance(
     session: CaptureSession,
@@ -420,42 +416,36 @@ def _advance(
     messages: list[ConversationMessage],
 ) -> tuple[NextQuestion | None, ExperienceContent | None]:
     count = _question_count(messages)
-    if count >= 3:
-        result = ReflectionAdvanceResult(
-            ready_for_confirmation=True,
-            draft=_forced_limit_draft(),
+    try:
+        result = provider.advance_reflection(
+            messages,
+            ExperienceDraft.model_validate(session.draft_json)
+            if session.draft_json
+            else None,
+            count,
         )
-    else:
-        try:
-            result = provider.advance_reflection(
-                messages,
-                ExperienceDraft.model_validate(session.draft_json)
-                if session.draft_json
-                else None,
-                count,
-            )
-            result = ReflectionAdvanceResult.model_validate(result)
-        except ProviderTimeoutError as exc:
-            raise AppError(
-                504, "AI_TIMEOUT", "AI 服务响应超时，请重试。", retryable=True
-            ) from exc
-        except ProviderInvalidOutputError as exc:
-            raise AppError(
-                502, "AI_INVALID_OUTPUT", "AI 返回内容无法校验。", retryable=True
-            ) from exc
-        except ProviderUnavailableError as exc:
-            raise AppError(
-                502,
-                "AI_INVALID_OUTPUT",
-                "AI 服务暂时不可用，请重试。",
-                retryable=exc.retryable,
-            ) from exc
-        except AppError:
-            raise
-        except Exception as exc:
-            raise AppError(
-                502, "AI_INVALID_OUTPUT", "AI 返回内容无法校验。", retryable=True
-            ) from exc
+        result = ReflectionAdvanceResult.model_validate(result)
+    except ProviderTimeoutError as exc:
+        raise AppError(
+            504, "AI_TIMEOUT", "AI 服务响应超时，请重试。", retryable=True
+        ) from exc
+    except ProviderInvalidOutputError as exc:
+        raise AppError(
+            502, "AI_INVALID_OUTPUT", "AI 返回内容无法校验。", retryable=True
+        ) from exc
+    except ProviderUnavailableError as exc:
+        raise AppError(
+            502,
+            "AI_INVALID_OUTPUT",
+            "AI 服务暂时不可用，请重试。",
+            retryable=exc.retryable,
+        ) from exc
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError(
+            502, "AI_INVALID_OUTPUT", "AI 返回内容无法校验。", retryable=True
+        ) from exc
 
     if result.ready_for_confirmation:
         assert result.draft is not None
@@ -467,7 +457,7 @@ def _advance(
             {field: getattr(draft, field) for field in DRAFT_TEXT_FIELDS}
         )
 
-    if count >= 3 or not result.next_question:
+    if count >= MAX_REFLECTION_QUESTIONS or not result.next_question:
         raise AppError(502, "AI_INVALID_OUTPUT", "AI 未在问题上限内生成草稿。", True)
     question = _message(
         role=MessageRole.assistant,
@@ -569,6 +559,51 @@ def submit_text_turn(
         raise AppError(409, "INVALID_STATE", "当前会话不能提交回答。")
     return _submit_turn(
         db, provider, session, text, source=MessageSource.text
+    )
+
+
+def patch_reflection_answer(
+    db: Session,
+    provider: AIProvider,
+    session_id: str,
+    answer_turn_id: str,
+    patch: TurnPatch,
+) -> ReflectionResponse:
+    """Correct one answer and invalidate every AI message derived from its old text."""
+    session = _capture_or_404(db, session_id)
+    if session.status != CaptureStatus.reflecting:
+        raise AppError(409, "INVALID_STATE", "当前会话不能修改复盘回答。")
+
+    messages = _messages(session)
+    answer_index = next(
+        (index for index, message in enumerate(messages) if message.turn_id == answer_turn_id),
+        None,
+    )
+    if answer_index is None:
+        raise AppError(404, "TURN_NOT_FOUND", "要修改的回答不存在。")
+    answer = messages[answer_index]
+    if (
+        answer.role != MessageRole.user
+        or answer.kind != MessageKind.answer
+        or answer_index == 0
+        or messages[answer_index - 1].kind != MessageKind.question
+    ):
+        raise AppError(400, "INVALID_TURN", "只能修改 AI 复盘中的文字回答。")
+
+    messages[answer_index] = answer.model_copy(
+        update={"text": patch.text, "source": MessageSource.text}
+    )
+    # Subsequent questions and answers relied on the old answer and are stale.
+    messages = messages[: answer_index + 1]
+    session.draft_json = None
+    _store_messages(session, messages)
+    next_question, draft = _advance(session, provider, messages)
+    db.commit()
+    return ReflectionResponse(
+        session_id=session.id,
+        status=session.status,
+        next_question=next_question,
+        draft=draft,
     )
 
 

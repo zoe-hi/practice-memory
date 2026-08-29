@@ -87,12 +87,17 @@ class FakeAIProvider:
         if question_count == 0:
             return ReflectionAdvanceResult(
                 ready_for_confirmation=False,
-                next_question="后来发生了什么？你的调整带来了什么变化？",
+                next_question="调整后观察到了哪些可见变化？",
             )
         if question_count == 1:
             return ReflectionAdvanceResult(
                 ready_for_confirmation=False,
-                next_question="回头看，哪里做得好、哪里还不理想，后来的人最需要注意什么？",
+                next_question="哪些地方似乎有效，哪些地方还不理想？",
+            )
+        if question_count == 2:
+            return ReflectionAdvanceResult(
+                ready_for_confirmation=False,
+                next_question="下次需要注意什么？还有什么不确定、想继续观察的吗？",
             )
         return ReflectionAdvanceResult(
             ready_for_confirmation=True,
@@ -192,5 +197,15 @@ class FakeAIProvider:
             if any(token in text for token in ("不确定", "疑问", "还不知道")):
                 values["open_question"] = text
                 sources["open_question"] = [reflection.turn_id]
+
+        if len(answers) > 2:
+            follow_up = answers[2]
+            text = follow_up.text
+            if text.strip():
+                values["things_to_note"] = text
+                sources["things_to_note"] = [follow_up.turn_id]
+            if any(token in text for token in ("不确定", "疑问", "还不知道", "继续观察")):
+                values["open_question"] = text
+                sources["open_question"] = [follow_up.turn_id]
 
         return ExperienceDraft(**values, source_turn_ids=sources, warnings=[])

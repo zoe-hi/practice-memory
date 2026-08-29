@@ -119,6 +119,18 @@ class DraftPatch(StrictModel):
         return self
 
 
+class TurnPatch(StrictModel):
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("text cannot be blank")
+        return value
+
+
 class ConfirmRequest(StrictModel):
     contributor_name: str = Field(min_length=1, max_length=255)
     contributor_role: str | None = Field(default=None, max_length=255)

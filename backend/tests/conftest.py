@@ -56,6 +56,13 @@ def advance_to_draft(client: TestClient, session_id: str) -> dict:
         data={"text": "降低参与门槛做得好，但现场分散是不足；下次要提前准备收拢方法。"},
     )
     assert response.status_code == 200, response.text
+    assert response.json()["status"] == "reflecting"
+
+    response = client.post(
+        f"/api/v1/capture-sessions/{session_id}/turns",
+        data={"text": "下次要提前准备收拢方法；暂时不确定自由选书是否适合人数更多的活动。"},
+    )
+    assert response.status_code == 200, response.text
     assert response.json()["status"] == "needs_confirmation"
     return response.json()
 

@@ -30,6 +30,7 @@ from app.schemas import (
     EntryMode,
     ExperienceResponse,
     ReflectionResponse,
+    TurnPatch,
     TurnResponse,
 )
 from app.services import (
@@ -39,6 +40,7 @@ from app.services import (
     get_capture_session_detail,
     get_capture_session_list,
     patch_capture_session,
+    patch_reflection_answer,
     patch_draft,
     start_reflection,
     submit_audio_turn,
@@ -156,6 +158,19 @@ def submit_turn_endpoint(
         request.app.state.audio_storage,
         session_id,
         audio,
+    )
+
+
+@router.patch("/{session_id}/turns/{turn_id}", response_model=ReflectionResponse)
+def patch_reflection_answer_endpoint(
+    session_id: str,
+    turn_id: str,
+    patch: TurnPatch,
+    request: Request,
+    db: DbSession,
+) -> ReflectionResponse:
+    return patch_reflection_answer(
+        db, request.app.state.ai_provider, session_id, turn_id, patch
     )
 
 

@@ -34,9 +34,9 @@ REFLECTION_SYSTEM_PROMPT = """你是“经验捕手”的复盘助手。你只�
 必须遵守：
 1. 读取所有消息，后出现的明确纠正优先；不得把初始 marker 直接当成完整 context。
 2. 不得编造缺失事实，不得把个人经验提升为普遍规律、最佳实践或组织规则。
-3. 优先补齐 context、action_and_reason、observed_result，再询问 went_well、shortcomings、things_to_note、open_question。
-4. 每次最多返回一个简短、现场化的问题；目标在两轮内成稿，服务端硬上限为三问。
-5. 当输入中的 question_count 大于等于 2 时，必须立即返回最终草稿：ready_for_confirmation=true、next_question=null，绝不能继续提问。
+3. 优先补齐 context、action_and_reason、observed_result，再询问 went_well、shortcomings、things_to_note、open_question。已有明确来源的字段不要重复问。
+4. 每次最多返回一个简短、现场化的问题；仅针对仍缺失的字段继续追问，通常三至五轮成稿，服务端硬上限为五问。
+5. 当输入中的 question_count 大于等于 5 时，必须立即返回最终草稿：ready_for_confirmation=true、next_question=null，绝不能继续提问。
 6. 未知字段必须是 null；open_question 仅在贡献者明确表达不确定时填写。
 7. 草稿的 source_turn_ids 只能引用输入中给出的合法 turn_id；无法找到来源时保持空数组。
 8. 有冲突且无法继续追问时，在 warnings 中记录，不得自行选择一个说法。
@@ -352,7 +352,7 @@ class DashScopeAIProvider(AIProvider):
                 raw = _json_object_from_content(content)
                 next_question = raw.get("next_question")
                 if (
-                    question_count < 2
+                    question_count < 5
                     and isinstance(next_question, str)
                     and next_question.strip()
                 ):
@@ -377,7 +377,7 @@ class DashScopeAIProvider(AIProvider):
                 ) from exc
             if result.next_question is not None and not result.next_question.strip():
                 raise ProviderInvalidOutputError("model returned an empty question")
-            if question_count >= 2 and not result.ready_for_confirmation:
+            if question_count >= 5 and not result.ready_for_confirmation:
                 raise ProviderInvalidOutputError(
                     "model continued after the configured reflection limit"
                 )

@@ -1,6 +1,6 @@
 # 经验捕手｜前端 API 契约 v1
 
-> **用途：**前端开发的接口与状态事实来源。基线为 `546df09`。运行后仍以
+> **用途：**前端开发的接口与状态事实来源。当前工作分支为 `feat/frontend-golden-path`。运行后仍以
 > `http://127.0.0.1:8000/openapi.json` 为准。
 
 ## 1. 通用约定
@@ -66,12 +66,17 @@ PATCH /capture-sessions/{session_id}
 ```text
 POST /capture-sessions/{id}/start-reflection
 POST /capture-sessions/{id}/turns
+PATCH /capture-sessions/{id}/turns/{turn_id}
 ```
 
 - 开始复盘不带请求体；响应包含 `status`、可空 `next_question`、可空 `draft`。
 - 回答使用 `FormData`，仅传 `text` 或 `audio`；返回值额外包含 `answer_transcript`。
 - `next_question` 有值时继续展示问题；`draft` 有值且状态为 `needs_confirmation` 时切换到草稿页。
-- UI 不预设题目数量，完全根据响应切换；当前体验目标是两轮，后端硬上限为三问。
+- UI 不预设题目数量，完全根据响应切换；AI 仅针对缺失字段继续追问，通常三至五轮，后端硬上限为五问。
+- 已提交的**文字**回答可通过 `PATCH /capture-sessions/{id}/turns/{turn_id}` 修正：
+  请求体为 `{"text":"修正后的回答"}`。后端会保留修正前的上下文、删除该答案之后
+  基于旧内容产生的追问/回答，并重新返回下一问或经验草稿。前端不能仅在本地改气泡文字。
+- 语音回答如需修正，P0 采用“改用文字回答修正”的方式；不提供历史音频覆盖。
 
 ### 3.4 编辑与确认草稿
 
@@ -150,6 +155,7 @@ question_to_consider   可空，留给用户本人判断
 | `AI_INVALID_OUTPUT` | 显示“AI 暂未完成整理，请重试” |
 | `AUDIO_TOO_LARGE` / `UNSUPPORTED_AUDIO_TYPE` | 在上传控件旁提示限制 |
 | `SESSION_NOT_FOUND` / `EXPERIENCE_NOT_FOUND` | 跳回列表并提示记录不存在 |
+| `TURN_NOT_FOUND` / `INVALID_TURN` | 刷新会话详情；提示该条回答已不再可修改 |
 
 ## 7. 前端不得依赖或展示的内容
 
