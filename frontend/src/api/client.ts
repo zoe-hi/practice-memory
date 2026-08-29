@@ -16,3 +16,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return response.json() as Promise<T>;
 }
+
+export async function apiVoid(path: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(`${baseUrl}${path}`, init);
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: ApiError } | null;
+    throw new RequestError(body?.error ?? { code: "NETWORK_ERROR", message: "请求失败，请重试。", retryable: true }, response.status);
+  }
+}

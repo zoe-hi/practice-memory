@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi import UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 
@@ -91,6 +92,37 @@ def _capture_or_404(db: Session, session_id: str) -> CaptureSession:
     if session is None:
         raise AppError(404, "SESSION_NOT_FOUND", "会话不存在。")
     return session
+
+
+def delete_capture_session(
+    db: Session, storage: AudioStorage, session_id: str
+) -> None:
+    session = _capture_or_404(db, session_id)
+    if session.audio_temp_path:
+        storage.delete_session_dir(session.id)
+    db.delete(session)
+    db.commit()
+
+
+def delete_experience(
+    db: Session, storage: AudioStorage, experience_id: str
+) -> None:
+    experience = get_experience(db, experience_id)
+    if experience is None:
+        raise AppError(404, "EXPERIENCE_NOT_FOUND", "经验不存在。")
+    # Detach the confirmed capture session so its unique FK does not block the
+    # delete, and clean up any lingering audio for that session.
+    linked = db.scalars(
+        select(CaptureSession).where(
+            CaptureSession.confirmed_experience_id == experience_id
+        )
+    ).all()
+    for session in linked:
+        if session.audio_temp_path:
+            storage.delete_session_dir(session.id)
+        db.delete(session)
+    db.delete(experience)
+    db.commit()
 
 
 def _detail(session: CaptureSession) -> CaptureSessionDetail:

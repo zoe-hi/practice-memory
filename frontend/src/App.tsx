@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CapturePage } from "@/pages/CapturePage";
 import { ExperienceLibraryPage } from "@/pages/ExperienceLibraryPage";
 import { MyRecordsPage } from "@/pages/MyRecordsPage";
+import { Onboarding } from "@/components/Onboarding";
 import navMic from "@/imports/capture-nav-mic.svg";
 import navMicInactive from "@/imports/capture-nav-mic-inactive.svg";
 import navLibrary from "@/imports/capture-nav-mine.svg";
@@ -17,13 +18,45 @@ const tabs = [
 
 type TabKey = (typeof tabs)[number]["key"];
 
+const ONBOARDING_KEY = "practice-memory:onboarded";
+
 export default function App() {
   const [tab, setTab] = useState<TabKey>("capture");
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
+  const [captureKey, setCaptureKey] = useState(0);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try {
+      return localStorage.getItem(ONBOARDING_KEY) !== "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function dismissOnboarding() {
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // ignore storage failures; onboarding just shows again next launch
+    }
+    setShowOnboarding(false);
+  }
 
   function resumeCapture(sessionId: string) {
     setResumeSessionId(sessionId);
+    setCaptureKey((key) => key + 1);
     setTab("capture");
+  }
+
+  function startCapture() {
+    setResumeSessionId(null);
+    setCaptureKey((key) => key + 1);
+    setTab("capture");
+  }
+
+  function onTabClick(key: TabKey) {
+    // Tapping 记一下 always means "start a fresh capture", even when already on the tab.
+    if (key === "capture") startCapture();
+    else setTab(key);
   }
   return (
     <div className="flex h-screen w-full justify-center bg-lime-wash/40 sm:items-center sm:p-4">
@@ -33,10 +66,11 @@ export default function App() {
           <span className="tracking-[0.2em]">◫ ◫ ◫</span>
         </header>
         <main className="flex-1 overflow-y-auto">
-          {tab === "capture" && <CapturePage resumeSessionId={resumeSessionId} onMarkerSaved={() => { setResumeSessionId(null); setTab("mine"); }} onConfirmed={() => { setResumeSessionId(null); setTab("mine"); }} />}
+          {tab === "capture" && <CapturePage key={captureKey} resumeSessionId={resumeSessionId} onMarkerSaved={() => { setResumeSessionId(null); setTab("mine"); }} onConfirmed={() => { setResumeSessionId(null); setTab("mine"); }} onExit={() => { setResumeSessionId(null); setTab("mine"); }} />}
           {tab === "library" && <ExperienceLibraryPage />}
-          {tab === "mine" && <MyRecordsPage onResume={resumeCapture} />}
+          {tab === "mine" && <MyRecordsPage onResume={resumeCapture} onStartCapture={startCapture} />}
         </main>
+        {showOnboarding && <Onboarding onDismiss={dismissOnboarding} />}
         <nav className="z-20 shrink-0 border-t-2 border-ink bg-cream/95 px-6 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
             <div className="flex justify-between">
               {tabs.map((t) => {
@@ -44,7 +78,7 @@ export default function App() {
                 return (
                   <button
                     key={t.key}
-                    onClick={() => setTab(t.key)}
+                    onClick={() => onTabClick(t.key)}
                     className="flex flex-1 flex-col items-center gap-0.5"
                   >
                     <span

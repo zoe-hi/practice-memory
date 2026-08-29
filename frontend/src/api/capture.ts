@@ -1,4 +1,4 @@
-import { api } from "./client";
+import { api, apiVoid } from "./client";
 import type { CaptureSession, CaptureSessionCreated, DecisionSupportResponse, ExperienceContent, ReflectionResponse, TurnResponse } from "./types";
 
 export function createTextCapture(text: string, activityName: string) {
@@ -63,6 +63,14 @@ export type CaptureSessionSummary = {
 
 export function listPendingSessions() {
   return api<CaptureSessionSummary[]>("/capture-sessions?limit=20");
+}
+
+export function deleteCaptureSession(sessionId: string) {
+  return apiVoid(`/capture-sessions/${sessionId}`, { method: "DELETE" });
+}
+
+export function deleteExperience(experienceId: string) {
+  return apiVoid(`/experiences/${experienceId}`, { method: "DELETE" });
 }
 
 export function listExperiences() {

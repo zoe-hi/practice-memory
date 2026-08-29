@@ -36,6 +36,7 @@ from app.services import (
     confirm_experience,
     create_audio_capture_session,
     create_text_capture_session,
+    delete_capture_session,
     get_capture_session_detail,
     get_capture_session_list,
     patch_capture_session,
@@ -122,6 +123,14 @@ def patch_capture_session_endpoint(
     session_id: str, patch: CaptureSessionPatch, db: DbSession
 ) -> CaptureSessionDetail:
     return patch_capture_session(db, session_id, patch)
+
+
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_capture_session_endpoint(
+    session_id: str, request: Request, db: DbSession
+) -> Response:
+    delete_capture_session(db, request.app.state.audio_storage, session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{session_id}/start-reflection", response_model=ReflectionResponse)
