@@ -57,6 +57,10 @@ macOS/Linux 可将创建虚拟环境命令替换为 `python3.11 -m venv .venv`�
 `start-reflection`、两次 `turns`、`draft` 和 `confirm` 接口即可完成复盘闭环。
 `turns` 同样支持 `text` 或 `audio` 二选一。
 
+前端主页结束单段语音录制后会立即创建 marker 并跳转“我的”待处理列表；后台转写尚未
+完成时显示“正在转写”，开始复盘时后端会同步重试。经验库的决策支持也支持文字或单段
+浏览器语音输入。
+
 允许的音频 MIME 为 `audio/webm`、`audio/mp4`、`audio/x-m4a`、`audio/mpeg`
 和 `audio/wav`，默认大小上限为 15 MiB。初始音频在确认后清理，回答音频在转写后立即清理。
 

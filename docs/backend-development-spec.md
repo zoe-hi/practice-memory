@@ -1,9 +1,9 @@
-# 经验捕手｜后端开发规范 v1.6
+# 经验捕手｜后端开发规范 v1.7
 
 > **用途：**全新仓库的后端绿色开发规范，可直接交给 Codex 或后端开发者执行。  
 > **推荐仓库路径：**`docs/backend-development-spec.md`  
 > **状态：**Phase 1–7 implemented MVP specification
-> **更新时间：**2026-08-29  
+> **更新时间：**2026-08-30
 > **上位事实源：**Build Ledger v1.5；`docs/decision-support-backend-change-spec.md` v1.0
 > **适用范围：**She Nicest 黑客松 Golden Demo；单一演示身份、单实例部署。
 
@@ -78,9 +78,11 @@ practice-memory/
 ├── AGENTS.md
 ├── README.md
 ├── docs/
-│   └── backend-development-spec.md
+│   ├── backend-development-spec.md
+│   ├── frontend-api-contract.md
+│   └── frontend-prototype-cleanup-spec.md
 ├── backend/
-└── frontend/                         # 前端开始开发时再加入
+└── frontend/                         # React/TypeScript/Vite 移动端 Demo
 ```
 
 职责分工：
@@ -1037,7 +1039,8 @@ Windows 命令可以补充，但不要让 Windows 专用路径进入业务代码
 - 无匹配经验时返回 `match: null`、空 `considerations` 和 null 问题，不生成通用建议；
 - 不把个人经验改写为最佳实践、组织标准答案或确定性结论；
 - 不创建或复用 `capture_sessions`，不写入 `experiences`，不保存求助历史或模型原文；
-- 不新增数据库表、迁移、向量检索、组织配置后台、多轮顾问或前端实现。
+- 后端不新增数据库表、迁移、向量检索、组织配置后台或多轮顾问。当前前端通过同一
+  `text`/`audio` 二选一接口提供一次性决策支持；具体交互以 `frontend-api-contract.md` 为准。
 
 ### 19.2 API 与公开 Schema
 

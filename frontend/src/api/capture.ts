@@ -75,3 +75,10 @@ export function requestDecisionSupport(concern: string) {
   body.set("text", concern);
   return api<DecisionSupportResponse>("/decision-support", { method: "POST", body });
 }
+
+export function requestAudioDecisionSupport(audio: Blob) {
+  const body = new FormData();
+  body.set("activity_name", "亲子共读活动");
+  body.set("audio", audio, "decision-support.webm");
+  return api<DecisionSupportResponse>("/decision-support", { method: "POST", body });
+}

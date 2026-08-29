@@ -7,7 +7,7 @@ import { EXPERIENCE_FIELDS } from "@/lib/experience";
 import type { ExperienceContent } from "@/api/types";
 import micIllustration from "@/imports/capture-mic.svg";
 
-export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () => void; resumeSessionId?: string | null }) {
+export function CapturePage({ onConfirmed, onMarkerSaved, resumeSessionId }: { onConfirmed: () => void; onMarkerSaved: () => void; resumeSessionId?: string | null }) {
   const [text, setText] = useState("");
   const [session, setSession] = useState<CaptureSession | null>(null);
   const [originalMarkerTranscript, setOriginalMarkerTranscript] = useState<string | null>(null);
@@ -70,12 +70,17 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
       recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
       recorder.onstop = () => {
         const audio = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-        if (target === "marker") setRecordedAudio(audio);
-        else setRecordedAnswerAudio(audio);
         setRecording(false);
         if (timerRef.current !== null) window.clearInterval(timerRef.current);
         timerRef.current = null;
+        recorderRef.current = null;
         stopMediaStream();
+        if (target === "marker") {
+          setRecordedAudio(audio);
+          void uploadRecording(audio);
+        } else {
+          setRecordedAnswerAudio(audio);
+        }
       };
       streamRef.current = stream;
       recorderRef.current = recorder;
@@ -93,33 +98,18 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
   }
 
-  async function waitForTranscript(sessionId: string) {
-    for (let attempt = 0; attempt < 15; attempt += 1) {
-      const detail = await getCaptureSession(sessionId);
-      if (detail.marker_transcript || detail.status === "failed") return detail;
-      await new Promise((resolve) => window.setTimeout(resolve, 800));
-    }
-    return getCaptureSession(sessionId);
-  }
-
-  async function uploadRecording() {
-    if (!recordedAudio) return;
-    if (recordedAudio.size > 15 * 1024 * 1024) {
+  async function uploadRecording(audio: Blob | null = recordedAudio) {
+    if (!audio) return;
+    if (audio.size > 15 * 1024 * 1024) {
       setError("录音超过 15 MiB，请缩短后重录。");
       return;
     }
     setTranscribing(true); setError(null);
     try {
-      const created = await createAudioCapture(recordedAudio, ACTIVITY_NAME);
+      const created = await createAudioCapture(audio, ACTIVITY_NAME);
       localStorage.setItem("practice-memory:last-session", created.id);
-      const detail = await waitForTranscript(created.id);
-      if (detail.status === "failed" || !detail.marker_transcript) {
-        setError("录音已上传，但转写暂未完成。请稍后到“我的记录”继续处理，或改用文字输入。");
-        return;
-      }
-      setSession(detail);
-      setOriginalMarkerTranscript(detail.marker_transcript);
       setRecordedAudio(null);
+      onMarkerSaved();
     } catch (reason) { setError(reason instanceof RequestError ? reason.message : "录音上传失败，请重试。"); }
     finally { setTranscribing(false); }
   }
@@ -223,13 +213,13 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
         {recording && <><span className="animate-ring absolute inset-0 rounded-full bg-lime/70" /><span className="animate-ring absolute inset-0 rounded-full bg-lime/70" style={{ animationDelay: "1.1s" }} /></>}
         <img src={micIllustration} alt="" className="relative block h-full w-full" />
       </button>
-      <p className="mt-6 font-display text-xl font-extrabold text-ink">{recording ? `${String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:${String(recordingSeconds % 60).padStart(2, "0")}` : recordedAudio ? "本段语音已录制" : "点击开始语音记录"}</p>
+      <p className="mt-6 font-display text-xl font-extrabold text-ink">{recording ? `${String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:${String(recordingSeconds % 60).padStart(2, "0")}` : transcribing ? "正在保存到待处理…" : recordedAudio ? "录音保存未完成" : "点击开始语音记录"}</p>
       <p className="mt-2 text-xs text-ink-soft">录音仅用于转写，并按后端清理策略删除</p>
     </div> : <div className="flex flex-1 flex-col justify-center py-8"><label className="block space-y-2"><span className="text-sm font-bold text-ink">这次发生了什么？</span><textarea value={text} onChange={(event) => setText(event.target.value)} rows={8} placeholder="例如：三个孩子站在门口，没有进入共读区域……" className="w-full resize-none rounded-2xl border-2 border-ink bg-cream p-4 text-sm outline-none focus:border-leaf" /></label></div>}
     {error && <p className="mb-3 text-sm font-bold text-red-700">{error}</p>}
     <div className="space-y-3">
-      {inputMode === "audio" ? <button onClick={uploadRecording} disabled={!recordedAudio || recording || transcribing} className="w-full rounded-full border-2 border-ink bg-ink px-5 py-3 text-sm font-bold text-cream shadow-[3px_3px_0_0_#1c2b0a] disabled:cursor-not-allowed disabled:border-ink/10 disabled:bg-ink/10 disabled:text-ink-soft">{transcribing ? "正在转写…" : "活动完成，去整理"}</button> : <button onClick={submit} disabled={!text.trim() || submitting} className="w-full rounded-full border-2 border-ink bg-ink px-5 py-3 text-sm font-bold text-cream shadow-[3px_3px_0_0_#1c2b0a] disabled:cursor-not-allowed disabled:border-ink/10 disabled:bg-ink/10 disabled:text-ink-soft">{submitting ? "正在保存…" : "下一步：检查记录"}</button>}
-      <button onClick={() => { setInputMode(inputMode === "audio" ? "text" : "audio"); setError(null); }} className="w-full rounded-2xl border border-ink/40 bg-cream px-4 py-3 text-left text-sm text-ink-soft">{inputMode === "audio" ? "改用文字输入" : "返回语音记录"}</button>
+      {inputMode === "audio" ? (transcribing || recordedAudio ? <button onClick={() => void uploadRecording()} disabled={recording || transcribing} className="w-full rounded-full border-2 border-ink bg-ink px-5 py-3 text-sm font-bold text-cream shadow-[3px_3px_0_0_#1c2b0a] disabled:cursor-not-allowed disabled:border-ink/10 disabled:bg-ink/10 disabled:text-ink-soft">{transcribing ? "正在保存…" : "重新上传这段录音"}</button> : null) : <button onClick={submit} disabled={!text.trim() || submitting} className="w-full rounded-full border-2 border-ink bg-ink px-5 py-3 text-sm font-bold text-cream shadow-[3px_3px_0_0_#1c2b0a] disabled:cursor-not-allowed disabled:border-ink/10 disabled:bg-ink/10 disabled:text-ink-soft">{submitting ? "正在保存…" : "下一步：检查记录"}</button>}
+      <button onClick={() => { setInputMode(inputMode === "audio" ? "text" : "audio"); setError(null); }} disabled={recording || transcribing} className="w-full rounded-2xl border border-ink/40 bg-cream px-4 py-3 text-left text-sm text-ink-soft disabled:cursor-not-allowed disabled:opacity-50">{inputMode === "audio" ? "改用文字输入" : "返回语音记录"}</button>
     </div>
   </section>;
 }

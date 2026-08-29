@@ -33,7 +33,7 @@ export default function App() {
           <span className="tracking-[0.2em]">◫ ◫ ◫</span>
         </header>
         <main className="flex-1 overflow-y-auto">
-          {tab === "capture" && <CapturePage resumeSessionId={resumeSessionId} onConfirmed={() => { setResumeSessionId(null); setTab("mine"); }} />}
+          {tab === "capture" && <CapturePage resumeSessionId={resumeSessionId} onMarkerSaved={() => { setResumeSessionId(null); setTab("mine"); }} onConfirmed={() => { setResumeSessionId(null); setTab("mine"); }} />}
           {tab === "library" && <ExperienceLibraryPage />}
           {tab === "mine" && <MyRecordsPage onResume={resumeCapture} />}
         </main>
