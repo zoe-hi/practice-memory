@@ -102,8 +102,8 @@ activity_name + concern
 2. 系统读取后端预置的机构宗旨和工作原则。
 3. 系统只从已确认的 `experiences` 中检索 1 条最相关个人经验。
 4. 响应展示经验贡献者、日期、为什么相关和完整公开经验内容。
-5. 最多给出 2 个“可考虑方向”，并展示可能代价。
-6. 每个方向必须绑定检索到的经验 ID，不能无来源生成。
+5. 最多给出 2 个“可考虑方向”，并展示历史经验中已经记录的可能代价。
+6. 每个方向必须绑定检索到的经验 ID，并逐字复用该经验的允许字段，不能无来源生成或扩写新动作。
 7. 返回 1 个“仍需本人判断的问题”。
 8. 没有匹配经验时承认没有依据，不生成建议。
 9. FakeAI 和确定性 fallback 必须可以离线跑通文字路径。
@@ -167,6 +167,23 @@ MVP 决策支持是一次无状态请求：
 
 不新增数据库表，不做数据库迁移。
 
+### 3.4 当前输入、历史经验与 AI 整理的边界
+
+三类信息必须在语义上隔离：
+
+1. `concern_transcript` 是当前用户明确表达的事实，只来自文字输入或语音转写；
+2. `understanding` 在 P0 中等于规范化后的 `concern_transcript`，不得吸收匹配经验的结果、原因、不足或注意事项；
+3. `match.experience` 是独立展示的历史证据，不代表同样结果已经在当前现场发生；
+4. AI 只能选择和排列历史经验的允许字段，并提出一个仍需本人判断的问题；不得把推演写成当前事实；
+5. 机构语境只用于限制语气和决策边界，不能成为当前事实或经验来源。
+
+P0 使用严格来源模式：
+
+- `direction` 只能逐字取自 `action_and_reason` 或 `things_to_note`；
+- `tradeoff` 只能为 `null`，或逐字取自 `shortcomings` 或 `observed_result`；
+- `basis_fields` 必须准确声明上述实际取值字段；
+- 任何改写、拼接或新增具体动作都视为无效模型输出，并进入确定性 fallback。
+
 ---
 
 ## 4. 新 API 契约
@@ -200,7 +217,7 @@ Content-Type: multipart/form-data
 {
   "activity_name": "亲子共读活动",
   "concern_transcript": "现场很热闹，但几个孩子一直站在门口，我不知道该继续围坐还是让他们自由选书。",
-  "understanding": "你在判断应该继续维持围坐秩序，还是先降低孩子进入活动的门槛。",
+  "understanding": "现场很热闹，但几个孩子一直站在门口，我不知道该继续围坐还是让他们自由选书。",
   "match": {
     "experience": {
       "id": "00000000-0000-0000-0000-000000000001",
@@ -221,8 +238,8 @@ Content-Type: multipart/form-data
   },
   "considerations": [
     {
-      "direction": "可以考虑先提供自由选书等低门槛入口。",
-      "tradeoff": "孩子可能更愿意进入，但现场也可能变得分散。",
+      "direction": "判断围坐门槛较高，因此改为自由选书。",
+      "tradeoff": "自由选择后缺少重新收拢现场的方法。",
       "basis_experience_id": "00000000-0000-0000-0000-000000000001"
     }
   ],
@@ -317,6 +334,9 @@ class DecisionSupportAIResult(BaseModel):
 - `considerations` 最多 2 条；
 - 每条 `basis_fields` 至少 1 项；
 - `basis_fields` 只能引用所选经验中非空字段；
+- `direction` 必须逐字等于 `action_and_reason` 或 `things_to_note`，并在 `basis_fields` 中声明对应字段；
+- 非空 `tradeoff` 必须逐字等于 `shortcomings` 或 `observed_result`，并在 `basis_fields` 中声明对应字段；
+- 公开 `understanding` 始终使用规范化后的当前 `concern`，不使用模型对历史经验和当前事实的混合改写；
 - 输出禁止额外字段；
 - 空白字符串规范化为 `None` 或判为无效，遵守现有 Schema 风格。
 
@@ -350,7 +370,7 @@ FakeAI 必须完全离线、确定性，并足以跑通文字 Golden Path。
 
 建议规则：
 
-1. `understanding` 保守改写用户困扰，不加入新事实；
+1. `understanding` 直接使用规范化后的用户困扰，不加入新事实；
 2. 优先用 `action_and_reason` 生成第一个 `direction`；
 3. 优先用 `shortcomings`，其次 `observed_result` 生成 `tradeoff`；
 4. 若 `things_to_note` 非空且与第一条方向不同，可生成第二个方向；
@@ -367,6 +387,8 @@ FakeAI 必须完全离线、确定性，并足以跑通文字 Golden Path。
 - 唯一允许使用的匹配经验；
 - 允许引用的非空字段名；
 - 最多 2 个考虑方向；
+- `understanding` 必须与当前困扰一致，不得引用匹配经验中的结果或判断；
+- `direction` 和非空 `tradeoff` 必须逐字复制允许字段，不得改写、拼接或增加具体动作；
 - 禁止生成候选经验中不存在的事实；
 - 禁止使用“最佳实践”“一定应该”“组织标准答案”等表达；
 - 最终判断属于用户本人；
@@ -434,7 +456,7 @@ def create_decision_support(...):
 
 使用所选经验已有字段生成保守结果：
 
-- `understanding`：用户困扰的保守复述；
+- `understanding`：规范化后的用户困扰原文；
 - `direction`：优先取 `action_and_reason`，其次 `things_to_note`；
 - `tradeoff`：优先取 `shortcomings`，其次 `observed_result`；
 - `basis_experience_id`：服务层写入匹配经验 ID；
@@ -576,24 +598,27 @@ backend-implementation-handoff.md
 
 11. 每个公开 `basis_experience_id` 都等于返回的匹配经验 ID。
 12. considerations 最多 2 条。
-13. Provider 引用空字段或非法字段时判为无效。
-14. Provider 返回额外字段时判为无效。
-15. Provider 失败或返回非法结构时使用确定性 fallback。
-16. fallback 只使用匹配经验已有字段。
-17. 无匹配时不调用决策支持 Provider。
+13. 公开 `understanding` 等于规范化后的当前困扰，不包含历史经验事实。
+14. `direction` 只允许逐字取自 `action_and_reason` 或 `things_to_note`。
+15. 非空 `tradeoff` 只允许逐字取自 `shortcomings` 或 `observed_result`。
+16. Provider 引用空字段、非法字段，或返回与声明字段不一致的内容时判为无效。
+17. Provider 返回额外字段时判为无效。
+18. Provider 失败或返回非法结构时使用确定性 fallback。
+19. fallback 只使用匹配经验已有字段。
+20. 无匹配时不调用决策支持 Provider。
 
 ### 12.4 音频和隐私
 
-18. 音频转写成功后临时文件和目录被删除。
-19. 音频转写失败后临时文件和目录也被删除。
-20. 响应不包含文件路径、模型原始响应、内部 Prompt 或 API Key。
-21. 日志不包含完整音频转写和敏感配置。
+21. 音频转写成功后临时文件和目录被删除。
+22. 音频转写失败后临时文件和目录也被删除。
+23. 响应不包含文件路径、模型原始响应、内部 Prompt 或 API Key。
+24. 日志不包含完整音频转写和敏感配置。
 
 ### 12.5 回归
 
-22. 既有 capture/reflection/confirm Golden Path 全部继续通过。
-23. 既有 `/experiences/search` 响应保持兼容。
-24. 既有幂等确认、清理和 CORS 测试继续通过。
+25. 既有 capture/reflection/confirm Golden Path 全部继续通过。
+26. 既有 `/experiences/search` 响应保持兼容。
+27. 既有幂等确认、清理和 CORS 测试继续通过。
 
 ---
 

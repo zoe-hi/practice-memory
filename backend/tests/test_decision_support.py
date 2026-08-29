@@ -19,6 +19,10 @@ from app.seed import seed_experiences
 
 CONCERN = "现场很热闹，但几个孩子一直站在门口，我不知道该继续围坐还是让他们自由选书"
 MATCH_ID = "00000000-0000-4000-8000-000000000501"
+MATCH_ACTION = "我把统一围坐改成自由选书，希望先降低他们参与的门槛。"
+MATCH_RESULT = "孩子后来走进来翻书，但现场变得比较分散。"
+MATCH_SHORTCOMING = "自由选书后没有及时准备重新收拢大家的方法。"
+MATCH_NOTE = "提前准备自由选择之后的收拢环节。"
 
 
 def _seed(client: TestClient) -> None:
@@ -162,15 +166,15 @@ def _request_with_provider(settings, provider: FakeAIProvider) -> dict:
 def test_valid_provider_result_is_limited_and_bound_by_service(settings) -> None:
     provider = ResultProvider(
         {
-            "understanding": "你在判断是否降低进入活动的门槛。",
+            "understanding": "历史经验显示孩子后来进入了活动。",
             "considerations": [
                 {
-                    "direction": "先降低参与门槛。",
-                    "tradeoff": "现场可能变得分散。",
+                    "direction": MATCH_ACTION,
+                    "tradeoff": MATCH_SHORTCOMING,
                     "basis_fields": ["action_and_reason", "shortcomings"],
                 },
                 {
-                    "direction": "提前准备收拢环节。",
+                    "direction": MATCH_NOTE,
                     "tradeoff": None,
                     "basis_fields": ["things_to_note"],
                 },
@@ -181,6 +185,7 @@ def test_valid_provider_result_is_limited_and_bound_by_service(settings) -> None
 
     body = _request_with_provider(settings, provider)
 
+    assert body["understanding"] == CONCERN
     assert len(body["considerations"]) == 2
     assert {item["basis_experience_id"] for item in body["considerations"]} == {
         MATCH_ID
@@ -196,9 +201,39 @@ def test_provider_failure_and_invalid_sources_use_field_only_fallback(settings) 
                 "understanding": "理解",
                 "considerations": [
                     {
-                        "direction": "无来源方向",
+                        "direction": "给孩子递书并邀请坐到边位。",
                         "tradeoff": None,
-                        "basis_fields": ["open_question"],
+                        "basis_fields": ["action_and_reason"],
+                    }
+                ],
+                "question_to_consider": None,
+            }
+        ),
+        ResultProvider(
+            {
+                "understanding": "理解",
+                "considerations": [
+                    {
+                        "direction": MATCH_ACTION,
+                        "tradeoff": "现场可能会更分散。",
+                        "basis_fields": ["action_and_reason", "shortcomings"],
+                    }
+                ],
+                "question_to_consider": None,
+            }
+        ),
+        ResultProvider(
+            {
+                "understanding": "理解",
+                "considerations": [
+                    {
+                        "direction": MATCH_ACTION,
+                        "tradeoff": MATCH_SHORTCOMING,
+                        "basis_fields": [
+                            "action_and_reason",
+                            "shortcomings",
+                            "context",
+                        ],
                     }
                 ],
                 "question_to_consider": None,

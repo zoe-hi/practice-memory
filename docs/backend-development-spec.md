@@ -378,7 +378,9 @@ FakeAI 不是空壳。它必须足以跑通自动测试和 Golden Demo：
 - ASR 默认使用 `qwen3-asr-flash` 的同步 `MultiModalConversation` 调用，只接受后端已校验的本地绝对文件并转换为 `file://` URI；
 - 复盘默认使用 `qwen-plus` 的 `Generation` 调用和 `json_object` 输出模式，不设置可能截断 JSON 的 `max_tokens`；
 - 模型输入包含完整有序会话、当前草稿、问题数和合法 turn ID，不包含 API Key、服务器音频路径或数据库内部字段；
-- 输出必须经过 JSON 解析、`ReflectionAdvanceResult`/`ExperienceDraft` 校验，并拒绝不存在的 `source_turn_ids`；
+- 真实 SDK/模型可能把 JSON 放在 Markdown 代码围栏、文本前后缀或 `content` 文本块列表中；Provider 可以先剥离这些传输包装，但剥离后仍必须得到唯一 JSON 对象；
+- 输出必须经过 JSON 解析、`ReflectionAdvanceResult`/`ExperienceDraft` 严格校验，并拒绝额外字段、不存在的 `source_turn_ids` 与无来源事实；不得因兼容包装而放宽业务 Schema；
+- 追问阶段模型若同时返回下一问和推测性半成品草稿，服务只接受下一问并丢弃草稿；`question_count >= 2` 时必须成稿，继续提问视为非法输出；
 - 超时、网络错误、HTTP 429/5xx 和首次非法 JSON 最多重试一次；认证错误和确定性 4xx 不重试；
 - `rank_experiences` 使用严格 `{match: ExperienceMatch | null}` JSON，只能从最多 20 条输入候选中选择；非法输出由检索服务回退到本地确定性评分。
 

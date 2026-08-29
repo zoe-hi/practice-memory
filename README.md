@@ -153,7 +153,8 @@ API Key 与 Base URL 必须属于同一地域；使用 workspace 地址时用对
 `/api/v1` 地址覆盖 `AI_BASE_URL`。真实 Provider 会把内部临时音频作为本地
 `file://` URI 交给 Qwen-ASR，并要求 Qwen 返回严格 JSON；输出仍会经过 Pydantic
 和会话 turn 来源校验。决策支持只向模型传入机构语境、当前困扰、唯一匹配经验和允许
-引用的非空字段；输出经过严格 Schema 与来源字段校验，失败时回退到匹配经验已有字段。
+引用的非空字段；公开 `understanding` 固定为当前困扰，方向与代价必须逐字对应匹配经验
+的允许字段，失败时回退到匹配经验已有字段。
 Provider 错误不会向 API 响应暴露密钥、文件路径或模型原文。
 
 默认测试只使用离线适配器。只有显式设置 `RUN_REAL_AI_TESTS=1` 和 `AI_API_KEY`

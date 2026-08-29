@@ -59,6 +59,13 @@ def _ok_generation(content: str) -> dict[str, Any]:
     }
 
 
+def _ok_generation_blocks(content: str) -> dict[str, Any]:
+    return {
+        "status_code": 200,
+        "output": {"choices": [{"message": {"content": [{"text": content}]}}]},
+    }
+
+
 class StubDashScopeClient:
     def __init__(
         self,
@@ -273,8 +280,118 @@ def test_reflection_sends_complete_conversation_without_internal_secrets() -> No
 
 
 @pytest.mark.parametrize(
+    "response",
+    [
+        _ok_generation(
+            "```json\n"
+            '{"ready_for_confirmation":false,"next_question":"后来怎么样？","draft":null}'
+            "\n```"
+        ),
+        _ok_generation_blocks(
+            '{"ready_for_confirmation":false,"next_question":"后来怎么样？","draft":null}'
+        ),
+    ],
+)
+def test_reflection_accepts_common_json_wrappers(response: dict[str, Any]) -> None:
+    client = StubDashScopeClient(generation_results=[response])
+    result = DashScopeAIProvider(_settings(), client=client).advance_reflection(
+        [_marker()], None, 0
+    )
+    assert result.ready_for_confirmation is False
+    assert result.next_question == "后来怎么样？"
+
+
+def test_reflection_discards_speculative_draft_while_asking() -> None:
+    response = json.dumps(
+        {
+            "ready_for_confirmation": False,
+            "next_question": "后来怎么样？",
+            "draft": {
+                "context": "模型提前猜测的内容",
+                "unexpected_nested_shape": True,
+            },
+        },
+        ensure_ascii=False,
+    )
+    client = StubDashScopeClient(generation_results=[_ok_generation(response)])
+    result = DashScopeAIProvider(_settings(), client=client).advance_reflection(
+        [_marker()], None, 0
+    )
+    assert result.ready_for_confirmation is False
+    assert result.next_question == "后来怎么样？"
+    assert result.draft is None
+
+
+@pytest.mark.parametrize("ready_value", [None, "false", True])
+def test_reflection_normalizes_common_follow_up_flag_variations(ready_value) -> None:
+    response = {
+        "next_question": "后来怎么样？",
+        "draft": None,
+    }
+    if ready_value is not None:
+        response["ready_for_confirmation"] = ready_value
+    client = StubDashScopeClient(
+        generation_results=[_ok_generation(json.dumps(response, ensure_ascii=False))]
+    )
+
+    result = DashScopeAIProvider(_settings(), client=client).advance_reflection(
+        [_marker()], None, 0
+    )
+
+    assert result.ready_for_confirmation is False
+    assert result.next_question == "后来怎么样？"
+    assert result.draft is None
+
+
+def test_reflection_rejects_continuing_after_two_questions() -> None:
+    response = json.dumps(
+        {
+            "ready_for_confirmation": False,
+            "next_question": "还要继续问吗？",
+            "draft": None,
+        },
+        ensure_ascii=False,
+    )
+    client = StubDashScopeClient(
+        generation_results=[_ok_generation(response), _ok_generation(response)]
+    )
+    with pytest.raises(ProviderInvalidOutputError):
+        DashScopeAIProvider(_settings(), client=client).advance_reflection(
+            [_marker()], None, 2
+        )
+    assert len(client.generation_calls) == 2
+
+
+def test_reflection_rejects_an_all_null_final_draft() -> None:
+    empty_sources = {field: [] for field in DRAFT_TEXT_FIELDS}
+    empty_draft = json.dumps(
+        {
+            "ready_for_confirmation": True,
+            "next_question": None,
+            "draft": {
+                **{field: None for field in DRAFT_TEXT_FIELDS},
+                "source_turn_ids": empty_sources,
+                "warnings": [],
+            },
+        },
+        ensure_ascii=False,
+    )
+    client = StubDashScopeClient(
+        generation_results=[_ok_generation(empty_draft), _ok_generation(empty_draft)]
+    )
+
+    with pytest.raises(ProviderInvalidOutputError):
+        DashScopeAIProvider(_settings(), client=client).advance_reflection(
+            [_marker()], None, 2
+        )
+
+    assert len(client.generation_calls) == 2
+
+
+@pytest.mark.parametrize(
     "invalid_content",
     [
+        "not-json",
         "```json\n{}\n```",
         json.dumps(
             {
@@ -493,11 +610,11 @@ def test_dashscope_ranking_accepts_explicit_no_match_and_caps_input() -> None:
 def test_dashscope_decision_support_sends_one_experience_and_validates_sources() -> None:
     valid = json.dumps(
         {
-            "understanding": "你在判断是否降低进入活动的门槛。",
+            "understanding": "孩子一直站在门口",
             "considerations": [
                 {
-                    "direction": "可以参考先改为自由选书的处理。",
-                    "tradeoff": "现场可能变得分散。",
+                    "direction": "我改成自由选书，降低进入门槛。",
+                    "tradeoff": "现场变得比较分散。",
                     "basis_fields": ["action_and_reason", "shortcomings"],
                 }
             ],
@@ -531,6 +648,10 @@ def test_dashscope_decision_support_sends_one_experience_and_validates_sources()
     assert payload["matched_experience"]["id"] == "candidate-1"
     assert "candidates" not in payload
     assert "open_question" not in payload["allowed_basis_fields"]
+    system_prompt = client.generation_calls[0]["messages"][0]["content"]
+    assert "understanding 必须逐字复制 concern" in system_prompt
+    assert "direction 必须逐字复制" in system_prompt
+    assert "tradeoff 只能为 null，或逐字复制" in system_prompt
     serialized = json.dumps(client.generation_calls, ensure_ascii=False)
     assert "test-secret-key" not in serialized
     assert "file://" not in serialized

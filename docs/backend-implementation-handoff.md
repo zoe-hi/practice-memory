@@ -20,8 +20,8 @@
 ```
 
 音频上传、临时存储、转写、失败重试和清理路径已经实现。默认使用
-`FakeAIProvider`，不会访问网络；可切换到阿里云 DashScope Provider。真实
-DashScope 适配已通过伪造 SDK 的离线测试，但没有在默认测试中调用真实服务。
+`FakeAIProvider`，不会访问网络；可切换到阿里云 DashScope Provider。默认测试不调用
+真实服务；本地测试账号已额外验证真实 Provider、文字/手机 MP3 决策支持和两轮复盘链路。
 
 当前没有前端代码。后端公开接口已经稳定，可以开始在仓库根目录新增 `frontend/`
 进行对接。
@@ -37,6 +37,11 @@ Phase 7“有来源的决策支持”已经完成。文字路径可完全离线�
 - 完整经验必须从初始标记和全部复盘问答共同整理。
 - AI 可以转写、追问、结构化和排序，但不能补写用户没有表达的事实。
 - 未知字段保持 `null`；个人经验不能被表述成组织规则或普遍结论。
+- 决策支持的 `concern_transcript` 与公开 `understanding` 只表示当前输入；历史经验只在
+  `match.experience` 中展示，不能被写成当前现场事实。
+- 决策支持 `direction` 只能逐字取自历史经验的 `action_and_reason` 或 `things_to_note`；
+  非空 `tradeoff` 只能逐字取自 `shortcomings` 或 `observed_result`。模型改写、拼接、伪造
+  动作或声明无关来源时，服务层必须回退到确定性结果。
 - 只有贡献者主动确认后的记录才进入 `experiences` 表和经验检索候选。
 - 一个捕捉会话最多生成一条经验，重复确认必须返回同一经验。
 - `experiences` 不保存 `capture_session_id`。
@@ -50,15 +55,16 @@ Phase 7“有来源的决策支持”已经完成。文字路径可完全离线�
 | Phase 1 | FastAPI 应用、Pydantic 配置、SQLite/SQLAlchemy、统一错误、健康检查、测试夹具 | 完成 |
 | Phase 2 | 文字标记、列表/详情、转写修正、多轮 FakeAI 复盘、草稿修改、幂等确认 | 完成 |
 | Phase 3 | 安全音频上传、后台初始转写、同步重试、音频回答、隐私优先清理 | 完成 |
-| Phase 4 | DashScope Qwen-ASR、Qwen 结构化复盘、严格校验、超时/重试/错误映射 | 完成，真实服务默认不启用 |
+| Phase 4 | DashScope Qwen-ASR、Qwen 结构化复盘、严格校验、超时/重试/错误映射 | 完成；默认不启用，已在本地测试账号实测 |
 | Phase 5 | 6 条幂等种子经验、经验列表/详情、本地匹配、DashScope 候选排序与 fallback | 完成 |
 | Phase 6 | 启动清理、清理 CLI、严格 CORS、安全日志、最终文档和验收 | 完成 |
-| Phase 7 | 无状态决策支持：文字/音频困扰、单条已确认经验、最多两个有来源方向与 fallback | 完成，真实服务默认不启用 |
+| Phase 7 | 无状态决策支持：文字/音频困扰、单条已确认经验、最多两个逐字有来源方向与 fallback | 完成；默认不启用，已在本地测试账号实测 |
 
 Phase 7 实际边界：新增 `POST /api/v1/decision-support` multipart 接口；不复用或创建
 `capture_sessions`，不写入 `experiences`，不新增数据库表。无匹配经验时不生成建议；
-每个方向的公开来源 ID 由服务层绑定到返回的同一条经验。已新增
-`DEMO_ORG_CONTEXT`，并复用现有音频安全、同步 ASR、经验检索和统一错误能力。
+每个方向的公开来源 ID 由服务层绑定到返回的同一条经验；服务层还会验证方向、代价和
+声明字段逐字对应，违规模型输出使用确定性 fallback。已新增 `DEMO_ORG_CONTEXT`，并复用
+现有音频安全、同步 ASR、经验检索和统一错误能力。
 
 ## 4. 实际工程结构
 
@@ -311,7 +317,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```text
 python -m pytest -q
-90 passed, 1 skipped, 2 warnings
+99 passed, 1 skipped, 2 warnings
 
 python -m pip check
 No broken requirements found.
@@ -326,7 +332,8 @@ python -m app.cleanup（临时数据库）
 Cleanup deleted=0 failed=0 skipped=0.
 ```
 
-默认跳过的 1 项是需要真实 DashScope 密钥和显式开关的网络冒烟测试。两条已知警告
+默认跳过的 1 项是需要真实 DashScope 密钥和显式开关的网络冒烟测试；本地测试账号已
+额外手工执行该项。两条已知警告
 来自 Starlette TestClient/httpx 兼容提示，以及 DashScope SDK 导入已弃用
 Assistants API 的提示；当前实现未使用 Assistants API。
 
@@ -340,10 +347,16 @@ Assistants API 的提示；当前实现未使用 Assistants API。
 - 启动/CLI 过期清理、清理失败重试；
 - CORS 配置、预检和日志敏感信息不泄露。
 - 决策支持文字/音频、零写入、无匹配、严格来源、Provider fallback 和临时音频清理。
+- 真实 Provider 的 JSON 包装兼容、两轮追问硬上限、空草稿拒绝、真实文字和手机 MP3
+  决策支持，以及真实两轮复盘成稿。
 
 手工 TestClient 决策支持结果：健康检查 200，OpenAPI 包含新接口；文字困扰命中经验
 `00000000-0000-4000-8000-000000000501` 并返回 2 个来源方向；无匹配返回 null/空列表，
 且没有再次调用生成；数据库行数从 `(capture_sessions=0, experiences=6)` 到 `(0, 6)`。
+
+本地真实服务验收已覆盖：DashScope Provider 冒烟、文字决策支持、手机 MP3 的
+ASR→检索→决策支持→临时音频清理，以及“开始复盘→两轮回答→非空草稿”。真实模型的
+草稿仍属于待确认内容，前端必须保留编辑和确认步骤。
 
 ## 14. 前端接入建议
 
@@ -377,8 +390,7 @@ Assistants API 的提示；当前实现未使用 Assistants API。
 - 没有上传音频时长和真实媒体内容校验；当前只校验 MIME 与字节大小。
 - 没有速率限制、配额、生产监控平台或完整结构化审计日志。
 - 默认 FakeAI 无法转写真实音频；真实音频 Demo 需要 DashScope 配置。
-- DashScope 真实 ASR、复盘、检索和决策支持网络调用尚未在本项目默认验收中执行，地域、
-  额度和账号权限需要部署前单独验证。
+- 默认自动化验收仍不调用真实 DashScope；部署前仍需在目标地域、额度和账号权限下复验。
 - 决策支持不保存请求历史，也不支持多轮追问；这是当前冻结的无状态 MVP 边界。
 - 依赖使用版本范围而非 lockfile，重新安装可能取得不同补丁版本。
 

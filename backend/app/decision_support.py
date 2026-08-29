@@ -16,6 +16,8 @@ from app.schemas import (
 
 
 DEFAULT_DECISION_QUESTION = "你的现场与这条经验有哪些不同？"
+DIRECTION_SOURCE_FIELDS = ("action_and_reason", "things_to_note")
+TRADEOFF_SOURCE_FIELDS = ("shortcomings", "observed_result")
 
 
 def _candidate(match: ExperienceSearchMatch) -> ExperienceCandidate:
@@ -33,10 +35,35 @@ def _validate_sources(
 ) -> DecisionSupportAIResult:
     validated = DecisionSupportAIResult.model_validate(result)
     for consideration in validated.considerations:
-        for field in consideration.basis_fields:
-            value = getattr(experience, field)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError("decision support referenced an empty experience field")
+        direction_fields = {
+            field
+            for field in consideration.basis_fields
+            if field in DIRECTION_SOURCE_FIELDS
+            and getattr(experience, field) == consideration.direction
+        }
+        if len(direction_fields) != 1:
+            raise ValueError(
+                "decision support direction must exactly match one declared source field"
+            )
+
+        used_fields = set(direction_fields)
+        if consideration.tradeoff is not None:
+            tradeoff_fields = {
+                field
+                for field in consideration.basis_fields
+                if field in TRADEOFF_SOURCE_FIELDS
+                and getattr(experience, field) == consideration.tradeoff
+            }
+            if len(tradeoff_fields) != 1:
+                raise ValueError(
+                    "decision support tradeoff must exactly match one declared source field"
+                )
+            used_fields.update(tradeoff_fields)
+
+        if set(consideration.basis_fields) != used_fields:
+            raise ValueError(
+                "decision support basis fields must exactly describe the returned texts"
+            )
     return validated
 
 
@@ -90,7 +117,9 @@ def _public_response(
     return DecisionSupportResponse(
         activity_name=activity_name,
         concern_transcript=concern,
-        understanding=result.understanding,
+        # P0 deliberately exposes the normalized current input, not a model summary.
+        # This prevents facts from the historical match being presented as current facts.
+        understanding=concern,
         match=match,
         considerations=[
             DecisionConsideration(

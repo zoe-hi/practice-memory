@@ -36,10 +36,18 @@ REFLECTION_SYSTEM_PROMPT = """你是“经验捕手”的复盘助手。你只�
 2. 不得编造缺失事实，不得把个人经验提升为普遍规律、最佳实践或组织规则。
 3. 优先补齐 context、action_and_reason、observed_result，再询问 went_well、shortcomings、things_to_note、open_question。
 4. 每次最多返回一个简短、现场化的问题；目标在两轮内成稿，服务端硬上限为三问。
-5. 未知字段必须是 null；open_question 仅在贡献者明确表达不确定时填写。
-6. 草稿的 source_turn_ids 只能引用输入中给出的合法 turn_id；无法找到来源时保持空数组。
-7. 有冲突且无法继续追问时，在 warnings 中记录，不得自行选择一个说法。
-8. 只返回一个符合给定 Schema 的 JSON 对象，不要 Markdown、代码围栏、解释或额外字段。
+5. 当输入中的 question_count 大于等于 2 时，必须立即返回最终草稿：ready_for_confirmation=true、next_question=null，绝不能继续提问。
+6. 未知字段必须是 null；open_question 仅在贡献者明确表达不确定时填写。
+7. 草稿的 source_turn_ids 只能引用输入中给出的合法 turn_id；无法找到来源时保持空数组。
+8. 有冲突且无法继续追问时，在 warnings 中记录，不得自行选择一个说法。
+9. 只返回一个符合给定 Schema 的 JSON 对象，不要 Markdown、代码围栏、解释或额外字段。
+
+继续追问时必须使用这个精确形状，不要附带草稿：
+{"ready_for_confirmation":false,"next_question":"一个简短问题","draft":null}
+
+最终草稿必须设置 ready_for_confirmation=true、next_question=null，并返回 draft。draft 必须包含七个经验字段、source_turn_ids 和 warnings；source_turn_ids 必须是对象且包含全部七个经验字段名。请从 messages 中提取贡献者已经明确表达的内容，不要照抄空模板。每个非 null 字段必须列出支持它的合法 turn_id；真正没有表达的字段才使用 null 和空来源数组。最终草稿至少要有一个非 null 的经验字段。
+
+特别禁止：根据人数相减推出未表达的人数；为行动补充未说过的目的或因果；为结果、不足补充未说过的原因。任何没有明确来源的信息必须保持 null。
 """
 
 RETRIEVAL_SYSTEM_PROMPT = """你是“经验捕手”的相似经验排序器。
@@ -55,13 +63,16 @@ RETRIEVAL_SYSTEM_PROMPT = """你是“经验捕手”的相似经验排序器。
 DECISION_SUPPORT_SYSTEM_PROMPT = """你是“经验捕手”的有来源决策支持整理器。
 
 必须遵守：
-1. 只能使用输入中的机构宗旨、当前困扰和唯一匹配经验，不得引入外部知识或新事实。
-2. 输出最多两个可考虑方向；每个方向的 basis_fields 至少引用一个允许的非空经验字段。
-3. 可以说明经验中已经出现的代价或限制；没有依据时少输出或返回 null，不得补齐。
-4. 禁止使用“最佳实践”“一定应该”“组织标准答案”等权威或确定性表达。
-5. 最终判断属于用户本人；只保留一个仍需本人判断的问题。
-6. 不得生成经验、修改经验、选择经验 ID 或输出任何内部配置。
-7. 只返回符合给定 Schema 的 JSON 对象，不要 Markdown、代码围栏、解释或额外字段。
+1. understanding 必须逐字复制 concern，只能整理空白和标点；不得把历史经验的结果、原因或不足写成当前事实。
+2. 输出最多两个可考虑方向。direction 必须逐字复制 matched_experience.action_and_reason 或 matched_experience.things_to_note 的完整非空文本，不得改写、拼接、概括或增加例子。
+3. tradeoff 只能为 null，或逐字复制 matched_experience.shortcomings 或 matched_experience.observed_result 的完整非空文本。
+4. basis_fields 只能列出该条 direction 和 tradeoff 实际逐字取值的字段，不得添加无关字段。
+5. 机构宗旨只用于限制语气和边界，不能作为当前事实或 direction、tradeoff 的文字来源。
+6. question_to_consider 可以根据当前困扰与历史经验的差异提出，但不得把推测陈述为事实。
+7. 没有依据时少输出或返回 null，不得补齐；禁止引入外部知识、新事实或具体动作。
+8. 禁止使用“最佳实践”“一定应该”“组织标准答案”等权威或确定性表达；最终判断属于用户本人。
+9. 不得生成经验、修改经验、选择经验 ID 或输出任何内部配置。
+10. 只返回符合给定 Schema 的 JSON 对象，不要 Markdown、代码围栏、解释或额外字段。
 """
 
 
@@ -142,6 +153,43 @@ def _sequence_item(value: Any, key: str, index: int = 0) -> Any:
     if not isinstance(sequence, (list, tuple)) or len(sequence) <= index:
         raise ProviderInvalidOutputError("provider response shape is invalid")
     return sequence[index]
+
+
+def _json_object_from_content(content: Any) -> dict[str, Any]:
+    """Remove common SDK/model wrappers without relaxing schema validation."""
+    if isinstance(content, (list, tuple)):
+        fragments: list[str] = []
+        for item in content:
+            text = _value(item, "text")
+            if isinstance(text, str):
+                fragments.append(text)
+            elif isinstance(item, str):
+                fragments.append(item)
+        content = "".join(fragments)
+
+    if not isinstance(content, str) or not content.strip():
+        raise ProviderInvalidOutputError("model returned no JSON content")
+
+    candidate = content.strip()
+    if candidate.startswith("```"):
+        first_newline = candidate.find("\n")
+        if first_newline == -1:
+            raise ProviderInvalidOutputError("model response does not contain JSON")
+        candidate = candidate[first_newline + 1 :]
+        if candidate.rstrip().endswith("```"):
+            candidate = candidate.rstrip()[:-3]
+
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start == -1 or end < start:
+        raise ProviderInvalidOutputError("model response does not contain a JSON object")
+    try:
+        raw = json.loads(candidate[start : end + 1])
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ProviderInvalidOutputError("model response is not valid JSON") from exc
+    if not isinstance(raw, dict):
+        raise ProviderInvalidOutputError("model response must be a JSON object")
+    return raw
 
 
 def _response_status(response: Any) -> int:
@@ -286,7 +334,6 @@ class DashScopeAIProvider(AIProvider):
             "current_draft": (
                 current_draft.model_dump(mode="json") if current_draft else None
             ),
-            "response_schema": ReflectionAdvanceResult.model_json_schema(),
         }
         provider_messages = [
             {"role": "system", "content": REFLECTION_SYSTEM_PROMPT},
@@ -301,18 +348,47 @@ class DashScopeAIProvider(AIProvider):
             choice = _sequence_item(output, "choices")
             message = _value(choice, "message")
             content = _value(message, "content")
-            if not isinstance(content, str) or not content.strip():
-                raise ProviderInvalidOutputError("model returned no JSON content")
             try:
-                raw = json.loads(content)
+                raw = _json_object_from_content(content)
+                next_question = raw.get("next_question")
+                if (
+                    question_count < 2
+                    and isinstance(next_question, str)
+                    and next_question.strip()
+                ):
+                    unknown_fields = set(raw) - {
+                        "ready_for_confirmation",
+                        "next_question",
+                        "draft",
+                    }
+                    if unknown_fields:
+                        raise ProviderInvalidOutputError(
+                            "model returned unknown reflection fields"
+                        )
+                    raw = {
+                        "ready_for_confirmation": False,
+                        "next_question": next_question,
+                        "draft": None,
+                    }
                 result = ReflectionAdvanceResult.model_validate(raw)
-            except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+            except (ProviderInvalidOutputError, ValidationError, TypeError) as exc:
                 raise ProviderInvalidOutputError(
                     "model response does not match the reflection schema"
                 ) from exc
             if result.next_question is not None and not result.next_question.strip():
                 raise ProviderInvalidOutputError("model returned an empty question")
+            if question_count >= 2 and not result.ready_for_confirmation:
+                raise ProviderInvalidOutputError(
+                    "model continued after the configured reflection limit"
+                )
             if result.draft is not None:
+                if not any(
+                    getattr(result.draft, field) is not None
+                    for field in DRAFT_TEXT_FIELDS
+                ):
+                    raise ProviderInvalidOutputError(
+                        "model returned an empty reflection draft"
+                    )
                 unknown_fields = set(result.draft.source_turn_ids) - set(
                     DRAFT_TEXT_FIELDS
                 )
@@ -381,12 +457,10 @@ class DashScopeAIProvider(AIProvider):
             choice = _sequence_item(output, "choices")
             message = _value(choice, "message")
             content = _value(message, "content")
-            if not isinstance(content, str) or not content.strip():
-                raise ProviderInvalidOutputError("model returned no ranking JSON")
             try:
-                raw = json.loads(content)
+                raw = _json_object_from_content(content)
                 result = ExperienceRankingResult.model_validate(raw)
-            except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+            except (ProviderInvalidOutputError, ValidationError, TypeError) as exc:
                 raise ProviderInvalidOutputError(
                     "model response does not match the ranking schema"
                 ) from exc
@@ -438,14 +512,10 @@ class DashScopeAIProvider(AIProvider):
             choice = _sequence_item(output, "choices")
             message = _value(choice, "message")
             content = _value(message, "content")
-            if not isinstance(content, str) or not content.strip():
-                raise ProviderInvalidOutputError(
-                    "model returned no decision support JSON"
-                )
             try:
-                raw = json.loads(content)
+                raw = _json_object_from_content(content)
                 result = DecisionSupportAIResult.model_validate(raw)
-            except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+            except (ProviderInvalidOutputError, ValidationError, TypeError) as exc:
                 raise ProviderInvalidOutputError(
                     "model response does not match the decision support schema"
                 ) from exc
