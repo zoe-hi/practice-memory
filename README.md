@@ -4,6 +4,11 @@
 多轮复盘、音频回答、草稿修改、幂等确认，以及可选的阿里云 DashScope
 真实 ASR/大模型 Provider，并支持经验列表、详情、带本地 fallback 的相似检索和
 过期未确认会话清理，以及一次性、有来源的文字/音频决策支持。
+`frontend/` 包含 React/TypeScript/Vite 的移动端 Demo，当前整合目标是优先跑通真实
+DashScope 音频与复盘链路，同时保留 FakeAI 文字路径作为离线回归和演示兜底。
+
+本项目优先快速搭建可验证 MVP，不为登录、多租户、主题系统或未来规模提前引入框架。
+底部“我的”是演示页面名称，当前不代表已实现登录或用户级数据隔离。
 
 ## Windows 本地运行
 
@@ -19,6 +24,17 @@ uvicorn app.main:app --reload --port 8000
 
 健康检查：`GET http://localhost:8000/api/v1/health`。
 
+另开一个终端启动前端：
+
+```powershell
+cd frontend
+corepack pnpm install --frozen-lockfile
+Copy-Item .env.example .env
+corepack pnpm dev
+```
+
+浏览器打开 `http://localhost:5173`。后端 `CORS_ORIGINS` 必须包含该 Origin。
+
 ## 测试
 
 测试使用临时 SQLite 数据库、临时音频目录和离线 `FakeAIProvider`，不访问网络。
@@ -26,6 +42,10 @@ uvicorn app.main:app --reload --port 8000
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
+
+cd ..\frontend
+corepack pnpm typecheck
+corepack pnpm build
 ```
 
 macOS/Linux 可将创建虚拟环境命令替换为 `python3.11 -m venv .venv`，并使用

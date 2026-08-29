@@ -1,4 +1,4 @@
-# 经验捕手｜后端开发规范 v1.5
+# 经验捕手｜后端开发规范 v1.6
 
 > **用途：**全新仓库的后端绿色开发规范，可直接交给 Codex 或后端开发者执行。  
 > **推荐仓库路径：**`docs/backend-development-spec.md`  
@@ -380,7 +380,7 @@ FakeAI 不是空壳。它必须足以跑通自动测试和 Golden Demo：
 - 模型输入包含完整有序会话、当前草稿、问题数和合法 turn ID，不包含 API Key、服务器音频路径或数据库内部字段；
 - 真实 SDK/模型可能把 JSON 放在 Markdown 代码围栏、文本前后缀或 `content` 文本块列表中；Provider 可以先剥离这些传输包装，但剥离后仍必须得到唯一 JSON 对象；
 - 输出必须经过 JSON 解析、`ReflectionAdvanceResult`/`ExperienceDraft` 严格校验，并拒绝额外字段、不存在的 `source_turn_ids` 与无来源事实；不得因兼容包装而放宽业务 Schema；
-- 追问阶段模型若同时返回下一问和推测性半成品草稿，服务只接受下一问并丢弃草稿；`question_count >= 2` 时必须成稿，继续提问视为非法输出；
+- 追问阶段模型若同时返回下一问和推测性半成品草稿，服务只接受下一问并丢弃草稿；目标仍为两问成稿，`question_count == 2` 时只允许在关键冲突或缺口下追加唯一的第三问，`question_count >= 3` 时不得继续提问；第三问回答后优先再次调用 Provider 成稿，Provider 失败或仍提问时回退为带内部 warning 的安全空草稿；
 - 超时、网络错误、HTTP 429/5xx 和首次非法 JSON 最多重试一次；认证错误和确定性 4xx 不重试；
 - `rank_experiences` 使用严格 `{match: ExperienceMatch | null}` JSON，只能从最多 20 条输入候选中选择；非法输出由检索服务回退到本地确定性评分。
 
@@ -1135,7 +1135,11 @@ FakeAI 与 DashScope 使用同一配置入口；前端不提交，响应不完�
 `python -m pip check`、文字 Golden Path 和无匹配验证；真实网络测试仅在明确配置密钥和
 开关后运行。
 
-2026-08-29 实际验收：`90 passed, 1 skipped, 2 warnings`；`pip check` 无破损依赖。
+2026-08-29 Phase 7 初始验收：`90 passed, 1 skipped, 2 warnings`；`pip check` 无破损依赖。
 默认跳过项为真实 DashScope 网络冒烟测试。手工 TestClient 验证命中经验
 `00000000-0000-4000-8000-000000000501`，无匹配时未调用生成，且请求前后数据库行数
 保持 `capture_sessions=0, experiences=6`。
+
+2026-08-29 前后端整合回归：`101 passed, 1 skipped, 2 warnings`；`pip check` 无破损
+依赖。新增验证覆盖第二轮后允许唯一第三问、第三问后优先使用 Provider 草稿，以及模型
+仍失败时不追加第四问的安全回退。本轮未配置真实服务开关或密钥，网络冒烟仍跳过。

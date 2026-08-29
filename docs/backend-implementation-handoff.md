@@ -1,8 +1,8 @@
-# 经验捕手后端实现交接文档
+# 经验捕手实现交接文档
 
 > 文档日期：2026-08-29  
-> 实现基线：`main` 分支，Phase 7 工作树
-> 规范基线：`docs/backend-development-spec.md` v1.5
+> 实现基线：`integration/frontend-backend`
+> 规范基线：`docs/backend-development-spec.md` v1.6
 > 适用范围：黑客松 MVP、单演示身份、单实例部署
 
 ## 1. 当前结论
@@ -23,8 +23,9 @@
 `FakeAIProvider`，不会访问网络；可切换到阿里云 DashScope Provider。默认测试不调用
 真实服务；本地测试账号已额外验证真实 Provider、文字/手机 MP3 决策支持和两轮复盘链路。
 
-当前没有前端代码。后端公开接口已经稳定，可以开始在仓库根目录新增 `frontend/`
-进行对接。
+仓库现已包含 `frontend/` React/TypeScript/Vite 移动端 Demo，覆盖文字/单段语音标记、
+动态复盘、七字段草稿、确认、“我的”、经验库和文字决策支持。整合阶段优先验证真实
+DashScope 音频路径；FakeAI 继续用于离线回归和文字兜底。
 
 Phase 7“有来源的决策支持”已经完成。文字路径可完全离线运行；音频路径使用同步 ASR
 并在成功、失败或超时后清理。决策支持是一次无状态读取，不会创建捕捉会话或经验。
@@ -317,7 +318,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```text
 python -m pytest -q
-99 passed, 1 skipped, 2 warnings
+101 passed, 1 skipped, 2 warnings
 
 python -m pip check
 No broken requirements found.
@@ -332,8 +333,9 @@ python -m app.cleanup（临时数据库）
 Cleanup deleted=0 failed=0 skipped=0.
 ```
 
-默认跳过的 1 项是需要真实 DashScope 密钥和显式开关的网络冒烟测试；本地测试账号已
-额外手工执行该项。两条已知警告
+默认跳过的 1 项是需要真实 DashScope 密钥和显式开关的网络冒烟测试。本次整合验收环境
+未设置开关、进程密钥或 `backend/.env`，因此未调用真实服务；此前真实服务结果属于队友
+报告的手工验证，仍需在当前整合分支复验。两条已知警告
 来自 Starlette TestClient/httpx 兼容提示，以及 DashScope SDK 导入已弃用
 Assistants API 的提示；当前实现未使用 Assistants API。
 
@@ -347,24 +349,23 @@ Assistants API 的提示；当前实现未使用 Assistants API。
 - 启动/CLI 过期清理、清理失败重试；
 - CORS 配置、预检和日志敏感信息不泄露。
 - 决策支持文字/音频、零写入、无匹配、严格来源、Provider fallback 和临时音频清理。
-- 真实 Provider 的 JSON 包装兼容、两轮追问硬上限、空草稿拒绝、真实文字和手机 MP3
-  决策支持，以及真实两轮复盘成稿。
+- 真实 Provider 的 JSON 包装兼容、两轮成稿目标、第三问硬上限、空草稿拒绝和来源校验。
 
 手工 TestClient 决策支持结果：健康检查 200，OpenAPI 包含新接口；文字困扰命中经验
 `00000000-0000-4000-8000-000000000501` 并返回 2 个来源方向；无匹配返回 null/空列表，
 且没有再次调用生成；数据库行数从 `(capture_sessions=0, experiences=6)` 到 `(0, 6)`。
 
-本地真实服务验收已覆盖：DashScope Provider 冒烟、文字决策支持、手机 MP3 的
-ASR→检索→决策支持→临时音频清理，以及“开始复盘→两轮回答→非空草稿”。真实模型的
-草稿仍属于待确认内容，前端必须保留编辑和确认步骤。
+队友报告的本地真实服务验收曾覆盖：DashScope Provider 冒烟、文字决策支持、手机 MP3
+的 ASR→检索→决策支持→临时音频清理，以及“开始复盘→两轮回答→非空草稿”。当前整合
+分支改变了第三问容错，必须重新执行真实验证；真实模型草稿仍属于待确认内容。
 
-## 14. 前端接入建议
+## 14. 前端整合状态
 
-前端可以直接新增在仓库根目录 `frontend/`。建议按以下顺序接入：
+前端已位于仓库根目录 `frontend/`。当前整合规则：
 
 1. 配置 API Base URL，例如开发环境 `http://localhost:8000/api/v1`。
 2. 将前端开发 Origin 加入后端 `CORS_ORIGINS`。
-3. 先接文字 Golden Path，再接音频录制和上传。
+3. 真实联调优先验证 DashScope WebM 转写、动态复盘和决策支持；FakeAI 文字链路保留兜底。
 4. 创建标记和提交回答必须使用 `multipart/form-data`，不要手工设置 multipart boundary。
 5. 页面刷新后通过会话列表/详情恢复状态，不依赖纯前端内存。
 6. 根据 `status` 控制操作：`marked` 开始复盘，`reflecting` 回答，
@@ -375,12 +376,23 @@ ASR→检索→决策支持→临时音频清理，以及“开始复盘→两�
 10. 经验搜索只展示后端返回的已确认经验和 `why_similar`。
 11. 决策支持使用 multipart `activity_name` 和 `text`/`audio` 二选一；只展示后端返回的
     匹配经验、来源方向、代价和本人判断问题，不把它呈现为组织标准答案。
+12. 页面名称“我的”是明确的 MVP 演示决定；当前没有登录或用户级隔离，不得声称
+    “仅自己可见”或真实账户归属。
+
+前端验证命令：
+
+```powershell
+cd frontend
+corepack pnpm install --frozen-lockfile
+corepack pnpm typecheck
+corepack pnpm build
+```
 
 ## 15. 尚未实现和真实限制
 
 以下内容不应在交接时误认为已经完成：
 
-- 前端 React/TypeScript/Vite/PWA 尚未创建。
+- 前端尚无自动化组件/E2E 测试；当前已通过 TypeScript 严格检查和生产构建。
 - 没有登录、认证、用户隔离、权限模型或真实身份管理。
 - 没有 Alembic；现有数据库 Schema 变更需要人工策略，不能依靠 `create_all` 升级旧表。
 - 没有容器、CI/CD、部署清单、反向代理或 HTTPS 配置。
@@ -392,7 +404,7 @@ ASR→检索→决策支持→临时音频清理，以及“开始复盘→两�
 - 默认 FakeAI 无法转写真实音频；真实音频 Demo 需要 DashScope 配置。
 - 默认自动化验收仍不调用真实 DashScope；部署前仍需在目标地域、额度和账号权限下复验。
 - 决策支持不保存请求历史，也不支持多轮追问；这是当前冻结的无状态 MVP 边界。
-- 依赖使用版本范围而非 lockfile，重新安装可能取得不同补丁版本。
+- 后端依赖仍使用受控版本范围；前端已提交 pnpm lockfile 并固定 Corepack pnpm 版本。
 
 ## 16. 接手后的首轮检查清单
 
@@ -406,6 +418,7 @@ ASR→检索→决策支持→临时音频清理，以及“开始复盘→两�
 [ ] 运行 python -m app.seed 准备 Demo 数据
 [ ] 用文字路径手工走一遍 Golden Path
 [ ] 若启用 DashScope，先在测试账号验证 ASR、复盘和检索
+[ ] 运行前端 typecheck/build，并用浏览器走一遍录音 Golden Path
 [ ] 部署时确认单 worker、持久化磁盘、CORS 和 cleanup 调度
 ```
 

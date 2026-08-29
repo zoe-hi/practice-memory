@@ -2,9 +2,11 @@
   "name": "practice-memory-frontend",
   "private": true,
   "version": "1.0.0",
+  "packageManager": "pnpm@11.24.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
+    "typecheck": "tsc --noEmit",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt"

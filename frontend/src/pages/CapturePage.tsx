@@ -10,6 +10,7 @@ import micIllustration from "@/imports/capture-mic.svg";
 export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () => void; resumeSessionId?: string | null }) {
   const [text, setText] = useState("");
   const [session, setSession] = useState<CaptureSession | null>(null);
+  const [originalMarkerTranscript, setOriginalMarkerTranscript] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [question, setQuestion] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
           (message) => message.role === "assistant" && message.kind === "question",
         );
         setSession(detail);
+        setOriginalMarkerTranscript(detail.marker_transcript);
         setDraft(detail.draft);
         setQuestion(detail.status === "reflecting" ? latestQuestion?.text ?? null : null);
         setAnswer("");
@@ -116,6 +118,7 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
         return;
       }
       setSession(detail);
+      setOriginalMarkerTranscript(detail.marker_transcript);
       setRecordedAudio(null);
     } catch (reason) { setError(reason instanceof RequestError ? reason.message : "录音上传失败，请重试。"); }
     finally { setTranscribing(false); }
@@ -126,7 +129,7 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
     try {
       const created = await createTextCapture(text.trim(), ACTIVITY_NAME);
       const detail = await getCaptureSession(created.id);
-      setSession(detail); localStorage.setItem("practice-memory:last-session", created.id);
+      setSession(detail); setOriginalMarkerTranscript(detail.marker_transcript); localStorage.setItem("practice-memory:last-session", created.id);
     } catch (reason) { setError(reason instanceof RequestError ? reason.message : "创建记录失败，请重试。"); }
     finally { setSubmitting(false); }
   }
@@ -135,9 +138,16 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
     if (!session) return;
     setSaving(true); setError(null);
     try {
-      const savedSession = await patchCaptureSession(session.id, session.marker_transcript?.trim() ?? "");
-      setSession(savedSession);
-      const result = await startReflection(session.id) as { next_question: { text: string } | null; draft: ExperienceContent | null };
+      const transcript = session.marker_transcript?.trim() ?? "";
+      if (transcript && transcript !== (originalMarkerTranscript?.trim() ?? "")) {
+        const savedSession = await patchCaptureSession(session.id, transcript);
+        setSession(savedSession);
+        setOriginalMarkerTranscript(savedSession.marker_transcript);
+      }
+      const result = await startReflection(session.id);
+      const refreshed = await getCaptureSession(session.id);
+      setSession(refreshed);
+      setOriginalMarkerTranscript(refreshed.marker_transcript);
       setQuestion(result.next_question?.text ?? null);
       setDraft(result.draft);
     }
@@ -148,7 +158,7 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
   async function sendAnswer() {
     if (!session || !answer.trim()) return;
     setSaving(true); setError(null);
-    try { const result = await submitTextTurn(session.id, answer.trim()) as { next_question: { text: string } | null; draft: ExperienceContent | null }; setAnswer(""); setQuestion(result.next_question?.text ?? null); setDraft(result.draft); }
+    try { const result = await submitTextTurn(session.id, answer.trim()); setAnswer(""); setSession((current) => current ? { ...current, status: result.status, draft: result.draft } : current); setQuestion(result.next_question?.text ?? null); setDraft(result.draft); }
     catch (reason) { setError(reason instanceof RequestError ? reason.message : "提交回答失败，请重试。"); }
     finally { setSaving(false); }
   }
@@ -161,8 +171,9 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
     }
     setSaving(true); setError(null);
     try {
-      const result = await submitAudioTurn(session.id, recordedAnswerAudio) as { next_question: { text: string } | null; draft: ExperienceContent | null };
+      const result = await submitAudioTurn(session.id, recordedAnswerAudio);
       setRecordedAnswerAudio(null);
+      setSession((current) => current ? { ...current, status: result.status, draft: result.draft } : current);
       setQuestion(result.next_question?.text ?? null);
       setDraft(result.draft);
     } catch (reason) { setError(reason instanceof RequestError ? reason.message : "语音回答提交失败，请重试。"); }
@@ -213,7 +224,7 @@ export function CapturePage({ onConfirmed, resumeSessionId }: { onConfirmed: () 
         <img src={micIllustration} alt="" className="relative block h-full w-full" />
       </button>
       <p className="mt-6 font-display text-xl font-extrabold text-ink">{recording ? `${String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:${String(recordingSeconds % 60).padStart(2, "0")}` : recordedAudio ? "本段语音已录制" : "点击开始语音记录"}</p>
-      <p className="mt-2 text-xs text-ink-soft">录音内容默认仅自己可见</p>
+      <p className="mt-2 text-xs text-ink-soft">录音仅用于转写，并按后端清理策略删除</p>
     </div> : <div className="flex flex-1 flex-col justify-center py-8"><label className="block space-y-2"><span className="text-sm font-bold text-ink">这次发生了什么？</span><textarea value={text} onChange={(event) => setText(event.target.value)} rows={8} placeholder="例如：三个孩子站在门口，没有进入共读区域……" className="w-full resize-none rounded-2xl border-2 border-ink bg-cream p-4 text-sm outline-none focus:border-leaf" /></label></div>}
     {error && <p className="mb-3 text-sm font-bold text-red-700">{error}</p>}
     <div className="space-y-3">

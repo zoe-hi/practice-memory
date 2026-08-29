@@ -1,7 +1,7 @@
 # 经验捕手｜前端 API 契约 v1
 
-> **用途：**前端开发的接口与状态事实来源。基线为 `546df09`。运行后仍以
-> `http://127.0.0.1:8000/openapi.json` 为准。
+> **用途：**前端开发与前后端联调的接口、状态事实来源。运行时仍以
+> `http://127.0.0.1:8000/openapi.json` 为准；契约变更必须同步更新后端规范和测试。
 
 ## 1. 通用约定
 
@@ -50,7 +50,7 @@
 ### 3.2 列表、详情与初始转写修正
 
 ```text
-GET   /capture-sessions?status=marked&limit=20
+GET   /capture-sessions?limit=20
 GET   /capture-sessions/{session_id}
 PATCH /capture-sessions/{session_id}
 ```
@@ -60,6 +60,9 @@ PATCH /capture-sessions/{session_id}
 
 `PATCH /capture-sessions/{id}` 使用 JSON；只提交发生变化的 `activity_name` 或
 `marker_transcript`。它用于用户修正 ASR 初始转写，不用于改复盘回答。
+
+初始音频后台转写暂未完成或失败时，`marker_transcript` 可以为 `null`。此时前端不得
+提交空转写 PATCH，应直接调用 `start-reflection`，让后端使用仍保留的初始音频同步重试。
 
 ### 3.3 开始复盘与回答
 
@@ -157,3 +160,10 @@ question_to_consider   可空，留给用户本人判断
 - 模型原始输出、内部 Prompt、草稿 `source_turn_ids`、`warnings`；
 - 未确认经验作为经验库内容；
 - 由前端自行拼出的来源、AI 结论或状态转换。
+
+## 8. MVP 演示身份
+
+- 底部页面名称固定为“我的”，用于表达 Demo 的个人记录视角；
+- 当前没有登录、鉴权、用户 ID 或服务端个人数据过滤，界面不得声称已实现这些能力；
+- 不得使用“仅自己可见”等隐私承诺；录音说明应准确描述转写用途和后端清理策略；
+- 为快速完成 MVP，不引入认证框架、全局状态框架或额外数据层。

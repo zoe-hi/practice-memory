@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { CaptureSession, CaptureSessionCreated, DecisionSupportResponse, ExperienceContent } from "./types";
+import type { CaptureSession, CaptureSessionCreated, DecisionSupportResponse, ExperienceContent, ReflectionResponse, TurnResponse } from "./types";
 
 export function createTextCapture(text: string, activityName: string) {
   const body = new FormData();
@@ -30,19 +30,19 @@ export function patchCaptureSession(sessionId: string, markerTranscript: string)
 }
 
 export function startReflection(sessionId: string) {
-  return api<{ status: string; next_question: { text: string } | null; draft: unknown | null }>(`/capture-sessions/${sessionId}/start-reflection`, { method: "POST" });
+  return api<ReflectionResponse>(`/capture-sessions/${sessionId}/start-reflection`, { method: "POST" });
 }
 
 export function submitTextTurn(sessionId: string, text: string) {
   const body = new FormData();
   body.set("text", text);
-  return api<{ status: string; next_question: { text: string } | null; draft: unknown | null }>(`/capture-sessions/${sessionId}/turns`, { method: "POST", body });
+  return api<TurnResponse>(`/capture-sessions/${sessionId}/turns`, { method: "POST", body });
 }
 
 export function submitAudioTurn(sessionId: string, audio: Blob) {
   const body = new FormData();
   body.set("audio", audio, "reflection-answer.webm");
-  return api<{ status: string; next_question: { text: string } | null; draft: unknown | null }>(`/capture-sessions/${sessionId}/turns`, { method: "POST", body });
+  return api<TurnResponse>(`/capture-sessions/${sessionId}/turns`, { method: "POST", body });
 }
 
 export function patchDraft(sessionId: string, draft: ExperienceContent) {

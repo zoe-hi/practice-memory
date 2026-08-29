@@ -2,8 +2,3 @@ node_modules/
 dist/
 .env
 .env.local
-
-# Unused Figma prototype source; canonical reference remains ../prototype/
-src/screens/
-src/lib/data.ts
-src/lib/ui.tsx

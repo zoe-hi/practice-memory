@@ -16,7 +16,7 @@ function ExperienceFields({ item, full = false }: { item: ExperienceContent; ful
 }
 
 function compactMatchReason(reason: string) {
-  const firstSentence = reason.replaceAll("concern", "当前困扰").replaceAll("候选", "历史经验").split(/[；。]/)[0]?.trim();
+  const firstSentence = reason.replace(/concern/g, "当前困扰").replace(/候选/g, "历史经验").split(/[；。]/)[0]?.trim();
   return firstSentence || "这条经验记录了相近的现场情况，可供对照参考。";
 }
 

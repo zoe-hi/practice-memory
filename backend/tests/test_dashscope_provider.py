@@ -343,11 +343,29 @@ def test_reflection_normalizes_common_follow_up_flag_variations(ready_value) -> 
     assert result.draft is None
 
 
-def test_reflection_rejects_continuing_after_two_questions() -> None:
+def test_reflection_allows_one_final_question_after_two_questions() -> None:
     response = json.dumps(
         {
             "ready_for_confirmation": False,
             "next_question": "还要继续问吗？",
+            "draft": None,
+        },
+        ensure_ascii=False,
+    )
+    client = StubDashScopeClient(generation_results=[_ok_generation(response)])
+    result = DashScopeAIProvider(_settings(), client=client).advance_reflection(
+        [_marker()], None, 2
+    )
+    assert result.ready_for_confirmation is False
+    assert result.next_question == "还要继续问吗？"
+    assert len(client.generation_calls) == 1
+
+
+def test_reflection_rejects_continuing_after_three_questions() -> None:
+    response = json.dumps(
+        {
+            "ready_for_confirmation": False,
+            "next_question": "不能再继续问。",
             "draft": None,
         },
         ensure_ascii=False,
@@ -357,7 +375,7 @@ def test_reflection_rejects_continuing_after_two_questions() -> None:
     )
     with pytest.raises(ProviderInvalidOutputError):
         DashScopeAIProvider(_settings(), client=client).advance_reflection(
-            [_marker()], None, 2
+            [_marker()], None, 3
         )
     assert len(client.generation_calls) == 2
 

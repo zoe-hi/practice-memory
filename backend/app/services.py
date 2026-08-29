@@ -414,48 +414,64 @@ def _forced_limit_draft() -> ExperienceDraft:
     )
 
 
+def _forced_limit_result() -> ReflectionAdvanceResult:
+    return ReflectionAdvanceResult(
+        ready_for_confirmation=True,
+        draft=_forced_limit_draft(),
+    )
+
+
 def _advance(
     session: CaptureSession,
     provider: AIProvider,
     messages: list[ConversationMessage],
 ) -> tuple[NextQuestion | None, ExperienceContent | None]:
     count = _question_count(messages)
-    if count >= 3:
-        result = ReflectionAdvanceResult(
-            ready_for_confirmation=True,
-            draft=_forced_limit_draft(),
+    try:
+        result = provider.advance_reflection(
+            messages,
+            ExperienceDraft.model_validate(session.draft_json)
+            if session.draft_json
+            else None,
+            count,
         )
-    else:
-        try:
-            result = provider.advance_reflection(
-                messages,
-                ExperienceDraft.model_validate(session.draft_json)
-                if session.draft_json
-                else None,
-                count,
-            )
-            result = ReflectionAdvanceResult.model_validate(result)
-        except ProviderTimeoutError as exc:
+        result = ReflectionAdvanceResult.model_validate(result)
+    except ProviderTimeoutError as exc:
+        if count >= 3:
+            result = _forced_limit_result()
+        else:
             raise AppError(
                 504, "AI_TIMEOUT", "AI 服务响应超时，请重试。", retryable=True
             ) from exc
-        except ProviderInvalidOutputError as exc:
+    except ProviderInvalidOutputError as exc:
+        if count >= 3:
+            result = _forced_limit_result()
+        else:
             raise AppError(
                 502, "AI_INVALID_OUTPUT", "AI 返回内容无法校验。", retryable=True
             ) from exc
-        except ProviderUnavailableError as exc:
+    except ProviderUnavailableError as exc:
+        if count >= 3:
+            result = _forced_limit_result()
+        else:
             raise AppError(
                 502,
                 "AI_INVALID_OUTPUT",
                 "AI 服务暂时不可用，请重试。",
                 retryable=exc.retryable,
             ) from exc
-        except AppError:
-            raise
-        except Exception as exc:
+    except AppError:
+        raise
+    except Exception as exc:
+        if count >= 3:
+            result = _forced_limit_result()
+        else:
             raise AppError(
                 502, "AI_INVALID_OUTPUT", "AI 返回内容无法校验。", retryable=True
             ) from exc
+
+    if count >= 3 and not result.ready_for_confirmation:
+        result = _forced_limit_result()
 
     if result.ready_for_confirmation:
         assert result.draft is not None
@@ -467,7 +483,7 @@ def _advance(
             {field: getattr(draft, field) for field in DRAFT_TEXT_FIELDS}
         )
 
-    if count >= 3 or not result.next_question:
+    if not result.next_question:
         raise AppError(502, "AI_INVALID_OUTPUT", "AI 未在问题上限内生成草稿。", True)
     question = _message(
         role=MessageRole.assistant,

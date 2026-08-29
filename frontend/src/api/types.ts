@@ -19,8 +19,9 @@ export type ConversationMessage = {
   created_at: string;
 };
 
-export type CaptureSession = ExperienceContent & {
+export type CaptureSession = {
   id: string;
+  entry_mode: "marker" | "direct_reflection";
   activity_name: string | null;
   marker_transcript: string | null;
   status: CaptureStatus;
@@ -36,9 +37,23 @@ export type ApiError = { code: string; message: string; retryable: boolean };
 
 export type CaptureSessionCreated = {
   id: string;
+  entry_mode: "marker" | "direct_reflection";
   activity_name: string | null;
   status: CaptureStatus;
   marker_transcript: string | null;
+  captured_at: string;
+  expires_at: string;
+};
+
+export type ReflectionResponse = {
+  session_id: string;
+  status: CaptureStatus;
+  next_question: { turn_id: string; text: string } | null;
+  draft: ExperienceContent | null;
+};
+
+export type TurnResponse = ReflectionResponse & {
+  answer_transcript: string;
 };
 
 export type ExperienceResponse = ExperienceContent & {
