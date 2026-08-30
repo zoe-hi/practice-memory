@@ -1,30 +1,48 @@
-# Practice Memory / 经验捕手
+# Practice Memory｜经验捕手
 
-当前后端已覆盖规范中的 Phase 1–7：文字/音频记忆标记、待复盘列表、
-多轮复盘、音频回答、草稿修改、幂等确认，以及可选的阿里云 DashScope
-真实 ASR/大模型 Provider，并支持经验列表、详情、带本地 fallback 的相似检索和
-过期未确认会话清理，以及一次性、有来源的文字/音频决策支持。
-`frontend/` 包含 React/TypeScript/Vite 的移动端 Demo，当前整合目标是优先跑通真实
-DashScope 音频与复盘链路，同时保留 FakeAI 文字路径作为离线回归和演示兜底。
+一个面向一线实践者的经验沉淀工具：在活动现场快速留下一段语音或文字线索，活动后由 AI 引导复盘，经本人确认后成为可检索、可追溯的个人经验。
 
-本项目优先快速搭建可验证 MVP，不为登录、多租户、主题系统或未来规模提前引入框架。
-底部“我的”是演示页面名称，当前不代表已实现登录或用户级数据隔离。
+## 核心创新
 
-## Windows 本地运行
+- **把记录与复盘分开**：现场录音只是“记忆标记”，停止录音即保存，不要求使用者当场整理完整故事。
+- **从完整对话还原经验**：AI 围绕标记继续追问，从整段复盘中整理情境、行动、结果与反思，而不是把一句录音直接包装成结论。
+- **由人决定什么值得留下**：AI 只负责转写、澄清和结构化；只有贡献者修改并明确确认的内容，才会进入经验库。
+- **让经验回到下一次判断中**：遇到相似困扰时，系统找回一条已确认经验，并展示有来源的做法、限制和开放问题，不生成“标准答案”。
+- **保留不确定性**：没有被实践者表达的事实保持为空，个人经验不会被放大成组织规则。
+
+## Demo 流程
+
+```text
+语音 / 文字记一下
+→ AI 引导复盘
+→ 生成经验草稿
+→ 本人修改并确认
+→ 存入经验库
+→ 在相似现场中被重新找回
+```
+
+当前 Demo 聚焦儿童阅读活动，支持文字与浏览器录音。录音仅用于转写，并按后端清理策略删除。“我的”是演示视角，不代表已实现登录或用户隔离。
+
+## 技术栈
+
+- 前端：React、TypeScript、Vite
+- 后端：FastAPI、SQLAlchemy、SQLite
+- AI：离线 `FakeAIProvider`，或可选的阿里云 DashScope ASR / 大模型
+
+## 本地运行
+
+后端（Python 3.11+）：
 
 ```powershell
 cd backend
-$python311 = "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe"
-& $python311 -m venv .venv
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-健康检查：`GET http://localhost:8000/api/v1/health`。
-
-另开一个终端启动前端：
+前端：
 
 ```powershell
 cd frontend
@@ -33,11 +51,16 @@ Copy-Item .env.example .env
 corepack pnpm dev
 ```
 
-浏览器打开 `http://localhost:5173`。后端 `CORS_ORIGINS` 必须包含该 Origin。
+打开 `http://localhost:5173`。默认使用 FakeAI，可直接演示确定性的离线文字流程；真实语音转写需在 `backend/.env` 中配置 DashScope。
 
-## 测试
+如需预置 Demo 经验：
 
-测试使用临时 SQLite 数据库、临时音频目录和离线 `FakeAIProvider`，不访问网络。
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.seed
+```
+
+## 验证
 
 ```powershell
 cd backend
@@ -48,144 +71,4 @@ corepack pnpm typecheck
 corepack pnpm build
 ```
 
-macOS/Linux 可将创建虚拟环境命令替换为 `python3.11 -m venv .venv`，并使用
-`source .venv/bin/activate` 激活。
-
-## Demo 路径
-
-通过 multipart `text` 或 `audio` 字段创建 `/api/v1/capture-sessions`，随后调用
-`start-reflection`、两次 `turns`、`draft` 和 `confirm` 接口即可完成复盘闭环。
-`turns` 同样支持 `text` 或 `audio` 二选一。
-
-前端主页结束单段语音录制后会立即创建 marker 并跳转“我的”待处理列表；后台转写尚未
-完成时显示“正在转写”，开始复盘时后端会同步重试。经验库的决策支持也支持文字或单段
-浏览器语音输入。
-
-允许的音频 MIME 为 `audio/webm`、`audio/mp4`、`audio/x-m4a`、`audio/mpeg`
-和 `audio/wav`，默认大小上限为 15 MiB。初始音频在确认后清理，回答音频在转写后立即清理。
-
-`.env.example` 默认使用 `AI_PROVIDER=fake`，不需要 API Key、不会访问网络，也不会
-猜测未知音频内容；无真实 ASR 时请使用文字 fallback。
-
-## 经验库与检索
-
-在 `backend/` 中显式导入 6 条脱敏 Demo 经验：
-
-```powershell
-.\.venv\Scripts\python.exe -m app.seed
-```
-
-种子使用固定 UUID，重复运行只跳过已有记录，不覆盖用户数据。应用启动时不会自动
-导入种子。经验库接口为：
-
-```text
-GET  /api/v1/experiences?activity_name=亲子共读活动&limit=20
-GET  /api/v1/experiences/{experience_id}
-POST /api/v1/experiences/search
-```
-
-搜索请求示例：
-
-```json
-{
-  "activity_name": "亲子共读活动",
-  "concern": "现场很热闹，但总有孩子站在门口"
-}
-```
-
-FakeAI 使用确定性的文字重合评分。DashScope 只允许从后端提供的最多 20 条候选中
-选择；真实排序超时、失败、输出非法或选择候选外 ID 时会自动使用相同本地评分，
-不会中断 Demo。
-
-## 有来源的决策支持
-
-接口为一次性 multipart 请求：
-
-```text
-POST /api/v1/decision-support
-activity_name=亲子共读活动
-text=现场很热闹，但几个孩子一直站在门口，我不知道该继续围坐还是让他们自由选书
-```
-
-`text` 与 `audio` 必须恰好提供一个。接口只从已确认经验中返回一条匹配记录，附带
-最多两个绑定该经验 ID 的可考虑方向和代价，以及一个仍需本人判断的问题。无匹配时
-返回 `match: null` 和空方向，不生成通用建议。请求是无状态的，不创建捕捉会话、不写
-经验表，也不保存求助录音或历史。
-
-先运行 seed 并启动 API，再用文字路径验证：
-
-```powershell
-curl.exe -X POST "http://localhost:8000/api/v1/decision-support" `
-  -F "activity_name=亲子共读活动" `
-  -F "text=现场很热闹，但几个孩子一直站在门口，我不知道该继续围坐还是让他们自由选书"
-```
-
-非敏感后端环境变量：
-
-```dotenv
-DEMO_ORG_CONTEXT=本机构服务村庄儿童、青少年与妇女；活动设计应从当地需求和环境出发，保留一线工作者判断，不让 AI 替代当地经验。
-```
-
-在 `backend/` 运行全量测试与依赖检查：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m pip check
-```
-
-## 过期会话清理
-
-应用会在数据库建表完成后、开始接收请求前清理一次已过期且未确认的会话。清理顺序是
-先删除对应音频目录，再删除数据库行；若音频清理失败，会话会保留并安全标记为
-`failed` / `STORAGE_ERROR`，供下次重试。已确认经验与尚未过期的会话不会被删除。
-
-运行期间需要再次清理时，在 `backend/` 显式执行：
-
-```powershell
-.\.venv\Scripts\python.exe -m app.cleanup
-```
-
-命令输出 `deleted`、`failed`、`skipped` 汇总；存在失败时退出码非零。MVP 不包含应用内
-定时器，周期调用由部署环境负责。清理也会移除崩溃后遗留、以
-`decision-support-` 开头且不关联数据库行的临时请求目录。
-
-## 配置与部署
-
-`CORS_ORIGINS` 必须包含至少一个合法的 HTTP/HTTPS Origin，多个值用逗号分隔；生产
-环境禁止 `*`。MVP 不使用 Cookie，CORS 仅允许 `GET`、`POST`、`PATCH`、`OPTIONS`
-以及 `Accept`、`Content-Type` 请求头。`LOG_LEVEL` 可设为 `DEBUG`、`INFO`、
-`WARNING`、`ERROR` 或 `CRITICAL`，默认 `INFO`。
-
-部署保持单 FastAPI 实例、单 worker，并将 SQLite 数据库和 `storage/audio` 放在持久化
-磁盘。应用日志只记录生命周期和清理汇总，不记录 API Key、完整转写、模型原文或音频路径。
-
-## DashScope 真实 Provider
-
-将 `.env` 中的配置改为：
-
-```dotenv
-AI_PROVIDER=dashscope
-AI_API_KEY=你的服务端密钥
-AI_BASE_URL=https://dashscope.aliyuncs.com/api/v1
-AI_MODEL=qwen-plus
-AI_ASR_MODEL=qwen3-asr-flash
-AI_TIMEOUT_SECONDS=75
-AI_MAX_RETRIES=1
-```
-
-API Key 与 Base URL 必须属于同一地域；使用 workspace 地址时用对应的 HTTPS
-`/api/v1` 地址覆盖 `AI_BASE_URL`。真实 Provider 会把内部临时音频作为本地
-`file://` URI 交给 Qwen-ASR，并要求 Qwen 返回严格 JSON；输出仍会经过 Pydantic
-和会话 turn 来源校验。决策支持只向模型传入机构语境、当前困扰、唯一匹配经验和允许
-引用的非空字段；公开 `understanding` 固定为当前困扰，方向与代价必须逐字对应匹配经验
-的允许字段，失败时回退到匹配经验已有字段。
-Provider 错误不会向 API 响应暴露密钥、文件路径或模型原文。
-
-默认测试只使用离线适配器。只有显式设置 `RUN_REAL_AI_TESTS=1` 和 `AI_API_KEY`
-时，才会运行会消耗真实额度的 DashScope 冒烟测试：
-
-```powershell
-$env:RUN_REAL_AI_TESTS = "1"
-$env:AI_API_KEY = "你的测试密钥"
-.\backend\.venv\Scripts\python.exe -m pytest backend/tests/test_dashscope_provider.py -q
-```
+详细产品与接口约束见 [`docs/backend-development-spec.md`](docs/backend-development-spec.md) 和 [`docs/frontend-api-contract.md`](docs/frontend-api-contract.md)。
